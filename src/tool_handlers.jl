@@ -110,7 +110,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
     end
 
     # Build work units mapping each item to its matching test environment
-    timeout = filter !== nothing ? get(filter, :timeout, nothing) : nothing
+    timeout = get(args, "timeout", nothing)
     work_units = [
         TestItemControllers.TestRunItem(item.id, env_id_for_item[item.id], timeout, log_level)
         for item in items
@@ -192,7 +192,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
                 "label" => item.label,
                 "uri" => item.uri,
                 "status" => string(item.status),
-                "duration" => item.duration,
+                "duration_ms" => item.duration,
                 "messages" => item.messages,
             ) for item in values(run_record.items) if item.status in (:failed, :errored)
         ]
@@ -225,7 +225,7 @@ function tool_rerun_failed(state::AppState, args::Dict{String,Any})
     new_args = copy(args)
     new_args["items"] = failed_ids
     # Preserve original profile params
-    for key in ("julia_cmd", "julia_args", "max_workers", "timeout", "mode")
+    for key in ("julia_cmd", "julia_args", "max_workers", "timeout", "mode", "julia_num_threads")
         if haskey(prev_run.profile_params, key) && !haskey(new_args, key)
             new_args[key] = prev_run.profile_params[key]
         end
@@ -285,7 +285,7 @@ function tool_get_testrun_results(state::AppState, args::Dict{String,Any})
                 "label" => item.label,
                 "uri" => item.uri,
                 "status" => string(item.status),
-                "duration" => item.duration,
+                "duration_ms" => item.duration,
                 "messages" => item.messages,
             )
             if include_output
@@ -318,7 +318,7 @@ function tool_get_testitem_detail(state::AppState, args::Dict{String,Any})
             "label" => item.label,
             "uri" => item.uri,
             "status" => string(item.status),
-            "duration" => item.duration,
+            "duration_ms" => item.duration,
             "messages" => item.messages,
             "output" => join(item.output, ""),
         )
@@ -397,9 +397,6 @@ function build_filter(args::Dict{String,Any})
     end
     if haskey(args, "package") && args["package"] !== nothing
         filter[:package] = args["package"]::String
-    end
-    if haskey(args, "timeout") && args["timeout"] !== nothing
-        filter[:timeout] = args["timeout"]
     end
     return isempty(filter) ? nothing : filter
 end

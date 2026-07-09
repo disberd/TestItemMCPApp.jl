@@ -59,7 +59,7 @@ function tool_definitions()
         ),
         Dict{String,Any}(
             "name" => "run_testitems",
-            "description" => "Run test items. Blocks until all tests complete and returns full results. If no items or filter specified, runs all detected test items. Test processes are reused across runs with Revise-based hot-reload for fast iteration.",
+            "description" => "Run test items. Blocks until all tests complete and returns full results. If no items or filter specified, runs all detected test items. Test processes are reused across runs with Revise-based hot-reload for fast iteration. Duration values in the response are in milliseconds. The timeout parameter is in seconds.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
                 "properties" => Dict{String,Any}(
@@ -104,8 +104,8 @@ function tool_definitions()
                     ),
                     "mode" => Dict{String,Any}(
                         "type" => "string",
-                        "enum" => ["Run", "Coverage"],
-                        "description" => "Execution mode (default: \"Run\").",
+                        "enum" => ["Normal", "Coverage"],
+                        "description" => "Execution mode (default: \"Normal\").",
                     ),
                     "timeout" => Dict{String,Any}(
                         "type" => "number",
@@ -133,6 +133,8 @@ function tool_definitions()
                     "julia_args" => Dict{String,Any}("type" => "array", "items" => Dict{String,Any}("type" => "string"), "description" => "Julia args override."),
                     "max_workers" => Dict{String,Any}("type" => "integer", "description" => "Max workers override."),
                     "timeout" => Dict{String,Any}("type" => "number", "description" => "Per-item timeout override."),
+                    "julia_num_threads" => Dict{String,Any}("type" => "string", "description" => "Thread count override."),
+                    "mode" => Dict{String,Any}("type" => "string", "enum" => ["Normal", "Coverage"], "description" => "Execution mode override."),
                 ),
                 "required" => ["testrun_id"],
             ),
@@ -153,7 +155,7 @@ function tool_definitions()
         ),
         Dict{String,Any}(
             "name" => "get_testrun_results",
-            "description" => "Get results for a completed or in-progress test run.",
+            "description" => "Get results for a completed or in-progress test run. Duration values are in milliseconds.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
                 "properties" => Dict{String,Any}(

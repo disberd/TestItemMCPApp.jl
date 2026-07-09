@@ -93,7 +93,7 @@ function build_test_environments(params::Dict{String,Any}, item_package_info::Di
     julia_num_threads = let v = get(params, "julia_num_threads", nothing)
         v isa String ? v : nothing
     end
-    mode = get(params, "mode", "Run")::String
+    mode = get(params, "mode", "Normal")::String
     max_processes = get(params, "max_workers", min(Sys.CPU_THREADS, 8))::Int
     coverage_root_uris = let v = get(params, "coverage_root_uris", nothing)
         v === nothing ? nothing : convert(Vector{String}, v)
