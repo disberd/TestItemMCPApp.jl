@@ -17,7 +17,10 @@ include("tool_handlers.jl")
 include("mcp_server.jl")
 
 function (@main)(ARGS)
-    # All logging goes to stderr — stdout is exclusively for MCP messages
+    # The app shim sets JULIA_LOAD_PATH to the app environment. Clear it so
+    # spawned test processes inherit a default LOAD_PATH with "@" (active project).
+    delete!(ENV, "JULIA_LOAD_PATH")
+
     debuglogger = Logging.ConsoleLogger(stderr, Logging.Debug)
     Logging.with_logger(debuglogger) do
         run_server(stdin, stdout)
