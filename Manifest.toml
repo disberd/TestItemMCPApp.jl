@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "04c61a35931fcf07a28fee71855b8aaa4741ad4e"
+project_hash = "0208d676a38abd67d03a17531b2122d1f0a96b96"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -269,9 +269,9 @@ version = "1.11.0"
 
 [[deps.TestItemControllers]]
 deps = ["Dates", "Mmap", "Sockets", "UUIDs", "Unicode"]
-git-tree-sha1 = "bbdc1798fe87f872c8172fafea3d70eaa6f32d78"
+git-tree-sha1 = "49b14ca4a5641d291bb235571a67bff8b7c1425c"
 uuid = "340407ab-12a4-4a78-8da2-3de3b3fd1448"
-version = "1.0.0"
+version = "1.1.0"
 
 [[deps.TestItemDetection]]
 deps = ["JuliaSyntax"]
