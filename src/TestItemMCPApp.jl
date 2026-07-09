@@ -1,6 +1,8 @@
 module TestItemMCPApp
 
-import JSON, JSONRPC, JuliaWorkspaces, TestItemControllers, CancellationTokens
+import JSON, JSONRPC, JuliaWorkspaces, TestItemControllers
+# Use TestItemControllers' bundled CancellationTokens to avoid type mismatch
+const CancellationTokens = TestItemControllers.CancellationTokens
 import UUIDs, Dates, Logging
 
 include("types.jl")

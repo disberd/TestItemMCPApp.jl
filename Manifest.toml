@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "0208d676a38abd67d03a17531b2122d1f0a96b96"
+project_hash = "ba5db50b8daac6f66a953c8d0eab3d3ac9e44f45"
 
 [[deps.ArgTools]]
 uuid = "0dad84c5-d112-42e6-8d28-ef12dabb789f"
@@ -280,7 +280,7 @@ uuid = "76b0de8b-5c4b-48ef-a724-914b33ca988d"
 version = "1.1.0"
 
 [[deps.TestItemMCPApp]]
-deps = ["CancellationTokens", "Dates", "JSON", "JSONRPC", "JuliaWorkspaces", "Logging", "TestItemControllers", "UUIDs"]
+deps = ["Dates", "JSON", "JSONRPC", "JuliaWorkspaces", "Logging", "TestItemControllers", "UUIDs"]
 path = "."
 uuid = "872bb665-be73-4a1a-b936-3df7f172039c"
 version = "0.1.0"
