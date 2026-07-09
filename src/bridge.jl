@@ -26,11 +26,11 @@ function resolve_testitems(state::AppState; filter=nothing)
                 env.package_uri === nothing ? "" : string(env.package_uri),
                 item.option_default_imports,
                 string.(item.option_setup),
-                JuliaWorkspaces.position_at(textfile.content, item.code_range.start)[1],
-                JuliaWorkspaces.position_at(textfile.content, item.code_range.start)[2],
+                JuliaWorkspaces.position_at(textfile.content, item.code_range.start).line,
+                JuliaWorkspaces.position_at(textfile.content, item.code_range.start).column,
                 textfile.content.content[item.code_range],
-                JuliaWorkspaces.position_at(textfile.content, item.code_range.stop)[1],
-                JuliaWorkspaces.position_at(textfile.content, item.code_range.stop)[2],
+                JuliaWorkspaces.position_at(textfile.content, item.code_range.stop).line,
+                JuliaWorkspaces.position_at(textfile.content, item.code_range.stop).column,
             ))
             item_package_info[item.id] = (
                 package_name = env.package_name,
@@ -47,8 +47,8 @@ function resolve_testitems(state::AppState; filter=nothing)
                 string(setup.name),
                 string(setup.kind),
                 string(uri),
-                JuliaWorkspaces.position_at(textfile.content, setup.code_range.start)[1],
-                JuliaWorkspaces.position_at(textfile.content, setup.code_range.start)[2],
+                JuliaWorkspaces.position_at(textfile.content, setup.code_range.start).line,
+                JuliaWorkspaces.position_at(textfile.content, setup.code_range.start).column,
                 textfile.content.content[setup.code_range],
             ))
         end
