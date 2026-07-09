@@ -57,7 +57,9 @@ Restart the Claude Code session after adding. The server exposes these tools:
 ## Upstream
 
 Fork of [julia-testitems/TestItemMCPApp.jl](https://github.com/julia-testitems/TestItemMCPApp.jl),
-adapted to work with General-registry dependency versions.
+with fixes to tool schemas (mode enum, `rerun_failed` parameter gaps, duration
+units) and additional features (`julia_env`, `log_level`, `get_process_output`,
+`terminate_all_processes`) not yet available upstream.
 
 ## Note
 
