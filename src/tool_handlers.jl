@@ -151,7 +151,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
             work_units,
             setups,
             max_processes,
-            cts.token;
+            CancellationTokens.get_token(cts);
             coverage_root_uris=coverage_root_uris,
         )
     catch e
