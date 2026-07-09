@@ -14,12 +14,20 @@ subsequent test runs skip recompilation.
 
 ## Install
 
+From the Julia REPL Pkg mode (`]`):
+
+```
+app add https://github.com/disberd/TestItemMCPApp.jl.git
+```
+
+Or equivalently from Julia code:
+
 ```julia
 import Pkg
 Pkg.Apps.add(url="https://github.com/disberd/TestItemMCPApp.jl.git")
 ```
 
-This installs the `juliatimcp` binary under `~/.julia/bin/`.
+Both install the `juliatimcp` binary under `~/.julia/bin/`.
 
 ## Claude Code setup
 
@@ -41,6 +49,8 @@ Restart the Claude Code session after adding. The server exposes these tools:
 | `list_testruns` | List all test runs in this session |
 | `list_test_processes` | Show live worker processes |
 | `terminate_test_process` | Kill a specific worker |
+| `terminate_all_processes` | Kill all workers (for Revise-incompatible changes) |
+| `get_process_output` | Retrieve process-level stdout/stderr |
 | `get_coverage_results` | Retrieve coverage data (`mode="Coverage"`) |
 | `update_file` | Notify the server of a file change on disk |
 
@@ -48,3 +58,8 @@ Restart the Claude Code session after adding. The server exposes these tools:
 
 Fork of [julia-testitems/TestItemMCPApp.jl](https://github.com/julia-testitems/TestItemMCPApp.jl),
 adapted to work with General-registry dependency versions.
+
+## Note
+
+Commits on top of the upstream original were developed with significant
+contribution from AI coding agents (Claude Code).
