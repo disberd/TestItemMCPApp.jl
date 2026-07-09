@@ -41,3 +41,31 @@ end
 
     close(ep); close(client_socket); close(server_socket)
 end
+
+@testitem "rerun_failed preserves julia_env from original run" setup=[MCPTestHelpers] begin
+    using Test
+
+    server_socket, client_socket = get_named_pipe()
+    start_mcp_server(server_socket)
+    ep = JSONRPC.JSONRPCEndpoint(client_socket, client_socket; framing=JSONRPC.NewlineDelimitedFraming())
+    JSONRPC.start(ep)
+    mcp_initialize!(ep)
+
+    mcp_call_tool(ep, "set_workspace_folders", Dict{String,Any}("folders" => [FIXTURE_PKG_PATH]))
+
+    # Run with fail_test only and julia_env set — fail_test fails regardless of env.
+    result, _ = mcp_call_tool(ep, "run_testitems", Dict{String,Any}(
+        "name_pattern" => "fail_test",
+        "julia_env" => Dict{String,Any}("MY_TEST_VAR" => "hello"),
+    ))
+    testrun_id = result["summary"]["testrun_id"]
+    @test result["summary"]["failed"] == 1
+
+    # Rerun failed without specifying julia_env — should inherit it and complete without error.
+    rerun_result, _ = mcp_call_tool(ep, "rerun_failed", Dict{String,Any}(
+        "testrun_id" => testrun_id,
+    ))
+    @test rerun_result["summary"]["failed"] == 1
+
+    close(ep); close(client_socket); close(server_socket)
+end

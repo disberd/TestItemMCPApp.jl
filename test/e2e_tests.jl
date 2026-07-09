@@ -45,3 +45,92 @@ end
 
     close(ep); close(client_socket); close(server_socket)
 end
+
+@testitem "julia_env passes environment variables to test process" setup=[MCPTestHelpers] begin
+    using Test
+
+    server_socket, client_socket = get_named_pipe()
+    start_mcp_server(server_socket)
+    ep = JSONRPC.JSONRPCEndpoint(client_socket, client_socket; framing=JSONRPC.NewlineDelimitedFraming())
+    JSONRPC.start(ep)
+    mcp_initialize!(ep)
+
+    mcp_call_tool(ep, "set_workspace_folders", Dict{String,Any}("folders" => [FIXTURE_PKG_PATH]))
+    result, _ = mcp_call_tool(ep, "run_testitems", Dict{String,Any}(
+        "name_pattern" => "env_var_test",
+        "julia_env" => Dict{String,Any}("MY_TEST_VAR" => "hello"),
+    ))
+    @test result["summary"]["passed"] == 1
+    @test result["summary"]["failed"] == 0
+
+    close(ep); close(client_socket); close(server_socket)
+end
+
+@testitem "get_process_output returns captured output" setup=[MCPTestHelpers] begin
+    using Test
+
+    server_socket, client_socket = get_named_pipe()
+    start_mcp_server(server_socket)
+    ep = JSONRPC.JSONRPCEndpoint(client_socket, client_socket; framing=JSONRPC.NewlineDelimitedFraming())
+    JSONRPC.start(ep)
+    mcp_initialize!(ep)
+
+    mcp_call_tool(ep, "set_workspace_folders", Dict{String,Any}("folders" => [FIXTURE_PKG_PATH]))
+    mcp_call_tool(ep, "run_testitems", Dict{String,Any}("name_pattern" => "pass_test"))
+
+    procs, _ = mcp_call_tool(ep, "list_test_processes", Dict{String,Any}())
+    @test length(procs) >= 1
+
+    output, _ = mcp_call_tool(ep, "get_process_output", Dict{String,Any}(
+        "process_id" => procs[1]["id"],
+    ))
+    @test output isa AbstractString || output isa AbstractVector
+
+    close(ep); close(client_socket); close(server_socket)
+end
+
+@testitem "terminate_all_processes kills all workers" setup=[MCPTestHelpers] begin
+    using Test
+
+    server_socket, client_socket = get_named_pipe()
+    start_mcp_server(server_socket)
+    ep = JSONRPC.JSONRPCEndpoint(client_socket, client_socket; framing=JSONRPC.NewlineDelimitedFraming())
+    JSONRPC.start(ep)
+    mcp_initialize!(ep)
+
+    mcp_call_tool(ep, "set_workspace_folders", Dict{String,Any}("folders" => [FIXTURE_PKG_PATH]))
+    mcp_call_tool(ep, "run_testitems", Dict{String,Any}("name_pattern" => "pass_test"))
+
+    procs_before, _ = mcp_call_tool(ep, "list_test_processes", Dict{String,Any}())
+    @test length(procs_before) >= 1
+
+    result, _ = mcp_call_tool(ep, "terminate_all_processes", Dict{String,Any}())
+    @test result isa AbstractString  # "Terminated N process(es)."
+
+    # Give processes time to die
+    sleep(1)
+
+    procs_after, _ = mcp_call_tool(ep, "list_test_processes", Dict{String,Any}())
+    @test length(procs_after) == 0
+
+    close(ep); close(client_socket); close(server_socket)
+end
+
+@testitem "run_testitems with log_level=Debug succeeds" setup=[MCPTestHelpers] begin
+    using Test
+
+    server_socket, client_socket = get_named_pipe()
+    start_mcp_server(server_socket)
+    ep = JSONRPC.JSONRPCEndpoint(client_socket, client_socket; framing=JSONRPC.NewlineDelimitedFraming())
+    JSONRPC.start(ep)
+    mcp_initialize!(ep)
+
+    mcp_call_tool(ep, "set_workspace_folders", Dict{String,Any}("folders" => [FIXTURE_PKG_PATH]))
+    result, _ = mcp_call_tool(ep, "run_testitems", Dict{String,Any}(
+        "name_pattern" => "pass_test",
+        "log_level" => "Debug",
+    ))
+    @test result["summary"]["passed"] == 1
+
+    close(ep); close(client_socket); close(server_socket)
+end

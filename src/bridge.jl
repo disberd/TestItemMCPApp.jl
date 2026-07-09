@@ -98,7 +98,9 @@ function build_test_environments(params::Dict{String,Any}, item_package_info::Di
     coverage_root_uris = let v = get(params, "coverage_root_uris", nothing)
         v === nothing ? nothing : convert(Vector{String}, v)
     end
-    log_level = :Info
+    log_level = let v = get(params, "log_level", "Info")
+        Symbol(v)
+    end
 
     # Collect unique packages
     unique_packages = Dict{String, NamedTuple}()
@@ -117,7 +119,9 @@ function build_test_environments(params::Dict{String,Any}, item_package_info::Di
             julia_cmd,
             julia_args,
             julia_num_threads,
-            Dict{String,Union{String,Nothing}}(),
+            let v = get(params, "julia_env", nothing)
+                v === nothing ? Dict{String,Union{String,Nothing}}() : convert(Dict{String,Union{String,Nothing}}, v)
+            end,
             mode,
             pkg.package_name,
             something(pkg.package_uri, ""),
