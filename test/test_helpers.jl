@@ -6,7 +6,7 @@
     # not the modules this testmodule itself imported. Re-export JSONRPC and JSON
     # so testitems can call e.g. `JSONRPC.JSONRPCEndpoint(...)` without a separate import.
     export get_named_pipe, start_mcp_server, mcp_initialize!, mcp_call_tool, mcp_list_tools,
-        JSONRPC, JSON
+        JSONRPC, JSON, FIXTURE_PKG_PATH
 
     const FIXTURE_PKG_PATH = joinpath(@__DIR__, "fixtures", "FakeTestPkg")
 
