@@ -13,10 +13,10 @@ TestItemControllers = "340407ab-12a4-4a78-8da2-3de3b3fd1448"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
 
 [sources]
-TestItemControllers = {url = "https://github.com/disberd/TestItemControllers.jl.git"}
+TestItemControllers = {rev = "d39ddb7b", url = "https://github.com/julia-testitems/TestItemControllers.jl.git"}
 
 [compat]
-TestItemControllers = "1.1"
+TestItemControllers = "1.0.1"
 
 [apps.juliatimcp]
 julia_flags = ["--startup-file=no"]
