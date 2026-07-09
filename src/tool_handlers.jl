@@ -426,6 +426,9 @@ function build_filter(args::Dict{String,Any})
     if haskey(args, "package") && args["package"] !== nothing
         filter[:package] = args["package"]::String
     end
+    if haskey(args, "timeout") && args["timeout"] !== nothing
+        filter[:timeout] = args["timeout"]
+    end
     return isempty(filter) ? nothing : filter
 end
 
