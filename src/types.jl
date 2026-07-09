@@ -47,7 +47,7 @@ function run_summary(run::TestRunRecord)
         "skipped" => skipped,
         "running" => running,
         "pending" => pending,
-        "duration" => total_duration,
+        "duration_ms" => total_duration,
         "status" => string(run.status),
         "testrun_id" => run.id,
         "started_at" => string(run.started_at),

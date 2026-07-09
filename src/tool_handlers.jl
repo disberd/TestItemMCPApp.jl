@@ -25,6 +25,10 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
         return tool_terminate_test_process(state, arguments)
     elseif tool_name == "get_coverage_results"
         return tool_get_coverage_results(state, arguments)
+    elseif tool_name == "get_process_output"
+        return tool_get_process_output(state, arguments)
+    elseif tool_name == "terminate_all_processes"
+        return tool_terminate_all_processes(state, arguments)
     else
         error("Unknown tool: $tool_name")
     end
@@ -110,7 +114,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
     end
 
     # Build work units mapping each item to its matching test environment
-    timeout = filter !== nothing ? get(filter, :timeout, nothing) : nothing
+    timeout = get(args, "timeout", nothing)
     work_units = [
         TestItemControllers.TestRunItem(item.id, env_id_for_item[item.id], timeout, log_level)
         for item in items
@@ -192,7 +196,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
                 "label" => item.label,
                 "uri" => item.uri,
                 "status" => string(item.status),
-                "duration" => item.duration,
+                "duration_ms" => item.duration,
                 "messages" => item.messages,
             ) for item in values(run_record.items) if item.status in (:failed, :errored)
         ]
@@ -225,7 +229,7 @@ function tool_rerun_failed(state::AppState, args::Dict{String,Any})
     new_args = copy(args)
     new_args["items"] = failed_ids
     # Preserve original profile params
-    for key in ("julia_cmd", "julia_args", "max_workers", "timeout", "mode")
+    for key in ("julia_cmd", "julia_args", "max_workers", "timeout", "mode", "julia_num_threads", "julia_env", "log_level")
         if haskey(prev_run.profile_params, key) && !haskey(new_args, key)
             new_args[key] = prev_run.profile_params[key]
         end
@@ -285,7 +289,7 @@ function tool_get_testrun_results(state::AppState, args::Dict{String,Any})
                 "label" => item.label,
                 "uri" => item.uri,
                 "status" => string(item.status),
-                "duration" => item.duration,
+                "duration_ms" => item.duration,
                 "messages" => item.messages,
             )
             if include_output
@@ -318,7 +322,7 @@ function tool_get_testitem_detail(state::AppState, args::Dict{String,Any})
             "label" => item.label,
             "uri" => item.uri,
             "status" => string(item.status),
-            "duration" => item.duration,
+            "duration_ms" => item.duration,
             "messages" => item.messages,
             "output" => join(item.output, ""),
         )
@@ -377,6 +381,30 @@ function tool_get_coverage_results(state::AppState, args::Dict{String,Any})
     coverage === :no_coverage && return tool_result_error("No coverage data. Was the run executed with mode=\"Coverage\"?")
 
     return tool_result_json(coverage)
+end
+
+# --- get_process_output ---
+
+function tool_get_process_output(state::AppState, args::Dict{String,Any})
+    process_id = args["process_id"]::String
+    output = lock(state.lock) do
+        get(state.process_outputs, process_id, nothing)
+    end
+    output === nothing && return tool_result_error("No output found for process: $process_id")
+    return tool_result_text(join(output, ""))
+end
+
+# --- terminate_all_processes ---
+
+function tool_terminate_all_processes(state::AppState, args::Dict{String,Any})
+    state.controller === nothing && return tool_result_error("Controller not initialized.")
+    process_ids = lock(state.lock) do
+        collect(keys(state.processes))
+    end
+    for pid in process_ids
+        TestItemControllers.terminate_test_process(state.controller, pid)
+    end
+    return tool_result_text("Terminated $(length(process_ids)) process(es).")
 end
 
 # --- Helpers ---

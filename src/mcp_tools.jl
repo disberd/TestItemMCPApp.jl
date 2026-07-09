@@ -59,7 +59,7 @@ function tool_definitions()
         ),
         Dict{String,Any}(
             "name" => "run_testitems",
-            "description" => "Run test items. Blocks until all tests complete and returns full results. If no items or filter specified, runs all detected test items. Test processes are reused across runs with Revise-based hot-reload for fast iteration.",
+            "description" => "Run test items. Blocks until all tests complete and returns full results. If no items or filter specified, runs all detected test items. Test processes are reused across runs with Revise-based hot-reload for fast iteration. Duration values in the response are in milliseconds. The timeout parameter is in seconds.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
                 "properties" => Dict{String,Any}(
@@ -104,8 +104,8 @@ function tool_definitions()
                     ),
                     "mode" => Dict{String,Any}(
                         "type" => "string",
-                        "enum" => ["Run", "Coverage"],
-                        "description" => "Execution mode (default: \"Run\").",
+                        "enum" => ["Normal", "Coverage"],
+                        "description" => "Execution mode (default: \"Normal\").",
                     ),
                     "timeout" => Dict{String,Any}(
                         "type" => "number",
@@ -115,6 +115,16 @@ function tool_definitions()
                         "type" => "array",
                         "items" => Dict{String,Any}("type" => "string"),
                         "description" => "Root URIs for coverage collection (Coverage mode only).",
+                    ),
+                    "julia_env" => Dict{String,Any}(
+                        "type" => "object",
+                        "additionalProperties" => Dict{String,Any}("type" => ["string", "null"]),
+                        "description" => "Environment variables for test processes. null removes a variable.",
+                    ),
+                    "log_level" => Dict{String,Any}(
+                        "type" => "string",
+                        "enum" => ["Debug", "Info", "Warn", "Error"],
+                        "description" => "Minimum log level for test output (default: \"Info\").",
                     ),
                 ),
             ),
@@ -133,6 +143,18 @@ function tool_definitions()
                     "julia_args" => Dict{String,Any}("type" => "array", "items" => Dict{String,Any}("type" => "string"), "description" => "Julia args override."),
                     "max_workers" => Dict{String,Any}("type" => "integer", "description" => "Max workers override."),
                     "timeout" => Dict{String,Any}("type" => "number", "description" => "Per-item timeout override."),
+                    "julia_num_threads" => Dict{String,Any}("type" => "string", "description" => "Thread count override."),
+                    "mode" => Dict{String,Any}("type" => "string", "enum" => ["Normal", "Coverage"], "description" => "Execution mode override."),
+                    "julia_env" => Dict{String,Any}(
+                        "type" => "object",
+                        "additionalProperties" => Dict{String,Any}("type" => ["string", "null"]),
+                        "description" => "Environment variables override.",
+                    ),
+                    "log_level" => Dict{String,Any}(
+                        "type" => "string",
+                        "enum" => ["Debug", "Info", "Warn", "Error"],
+                        "description" => "Log level override.",
+                    ),
                 ),
                 "required" => ["testrun_id"],
             ),
@@ -153,7 +175,7 @@ function tool_definitions()
         ),
         Dict{String,Any}(
             "name" => "get_testrun_results",
-            "description" => "Get results for a completed or in-progress test run.",
+            "description" => "Get results for a completed or in-progress test run. Duration values are in milliseconds.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
                 "properties" => Dict{String,Any}(
@@ -221,6 +243,25 @@ function tool_definitions()
                     "testrun_id" => Dict{String,Any}("type" => "string", "description" => "Test run ID (must have been run with mode=\"Coverage\")."),
                 ),
                 "required" => ["testrun_id"],
+            ),
+        ),
+        Dict{String,Any}(
+            "name" => "get_process_output",
+            "description" => "Get captured stdout/stderr from a test worker process. This includes startup logs, Revise messages, and output not associated with a specific test item.",
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => Dict{String,Any}(
+                    "process_id" => Dict{String,Any}("type" => "string", "description" => "Process ID."),
+                ),
+                "required" => ["process_id"],
+            ),
+        ),
+        Dict{String,Any}(
+            "name" => "terminate_all_processes",
+            "description" => "Terminate all active test worker processes. Use after code changes that Revise cannot hot-reload (struct redefinitions, module-level constants, __init__ changes).",
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => Dict{String,Any}(),
             ),
         ),
     ]

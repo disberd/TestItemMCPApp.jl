@@ -111,7 +111,7 @@ function read_resource(state::AppState, uri::String)
                     "label" => item.label,
                     "uri" => item.uri,
                     "status" => string(item.status),
-                    "duration" => item.duration,
+                    "duration_ms" => item.duration,
                     "messages" => item.messages,
                 ) for item in values(run.items) if item.status in (:failed, :errored)
             ]
