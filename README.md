@@ -62,4 +62,4 @@ adapted to work with General-registry dependency versions.
 ## Note
 
 Commits on top of the upstream original were developed with significant
-contribution from AI coding agents (Claude Code).
+contribution from AI coding agents.
