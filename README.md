@@ -11,8 +11,6 @@ subsequent test runs skip recompilation.
 ## Prerequisites
 
 - Julia 1.12+
-- [GithubSatcomRegistry](https://github.com/JuliaSatcomFramework/JuliaRegistry) (provides
-  TestItemControllers v1.1.0)
 
 ## Install
 
@@ -49,5 +47,6 @@ Restart the Claude Code session after adding. The server exposes these tools:
 ## Upstream
 
 Fork of [julia-testitems/TestItemMCPApp.jl](https://github.com/julia-testitems/TestItemMCPApp.jl),
-adapted to resolve dependencies from the General registry plus
-GithubSatcomRegistry.
+adapted to resolve all dependencies from the General registry. TestItemControllers
+is sourced from a [fork](https://github.com/disberd/TestItemControllers.jl)
+via `[sources]` in Project.toml — no private registry required.
