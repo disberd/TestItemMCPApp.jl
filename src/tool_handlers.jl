@@ -446,10 +446,11 @@ end
 function tool_close_session(state::AppState, args::Dict{String,Any})
     session = resolve_session(state, args)
     sid = session.id
-    lock(state.lock) do
-        delete!(state.sessions, sid)
+    removed = lock(state.lock) do
+        pop!(state.sessions, sid, nothing)
     end
-    shutdown_controller!(session)
+    removed === nothing && return tool_result_text("Session $sid already closed.")
+    shutdown_controller!(removed)
     mcp_info(state, "tools", "Session $sid closed")
     return tool_result_text("Session $sid closed.")
 end
