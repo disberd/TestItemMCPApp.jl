@@ -81,6 +81,7 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     end
     text *= "."
 
+    session.last_active[] = time()
     return tool_result_text(text)
 end
 

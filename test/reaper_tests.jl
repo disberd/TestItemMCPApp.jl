@@ -1,7 +1,7 @@
 @testitem "idle session reaper removes stale sessions" setup=[MCPTestHelpers] begin
     using Test
 
-    withenv("JULIATIMCP_IDLE_TIMEOUT_SECS" => "2") do
+    withenv("JULIATIMCP_IDLE_TIMEOUT_SECS" => "5") do
         server_socket, client_socket = get_named_pipe()
         start_mcp_server(server_socket)
         ep = JSONRPC.JSONRPCEndpoint(client_socket, client_socket; framing=JSONRPC.NewlineDelimitedFraming())
@@ -17,8 +17,8 @@
         items, _ = mcp_call_tool(ep, "list_testitems", Dict{String,Any}("session_id" => "reaper-test"))
         @test items isa AbstractVector
 
-        # Wait for idle timeout + reaper sweeps (timeout=2, interval=1, generous margin for CI)
-        sleep(6)
+        # Wait for idle timeout + reaper sweep (timeout=5, interval=max(1,5÷4)=1)
+        sleep(8)
 
         # Session should be gone — querying it should error
         _, raw = mcp_call_tool(ep, "list_testitems", Dict{String,Any}("session_id" => "reaper-test"))
