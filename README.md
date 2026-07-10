@@ -52,6 +52,7 @@ Restart the Claude Code session after adding. The server exposes these tools:
 | `terminate_all_processes` | Kill all workers (for Revise-incompatible changes) |
 | `get_process_output` | Retrieve process-level stdout/stderr |
 | `get_coverage_results` | Retrieve coverage data (`mode="Coverage"`) |
+| `close_session` | Close a session and free its workers |
 | `update_file` | Notify the server of a file change on disk |
 
 ## Changes from upstream
@@ -64,6 +65,14 @@ Differences from upstream, newest first:
 | Multi-session support — multiple clients share one Julia process via an external mux (see below) | [#3](https://github.com/disberd/TestItemMCPApp.jl/pull/3) |
 | Tool schema fixes (`mode` enum, `rerun_failed` parameter gaps, duration units) and new tools (`julia_env`, `log_level`, `get_process_output`, `terminate_all_processes`) | [#2](https://github.com/disberd/TestItemMCPApp.jl/pull/2) |
 | General-registry compatibility (resolve deps from General + GithubSatcomRegistry) | [#1](https://github.com/disberd/TestItemMCPApp.jl/pull/1) |
+
+## Configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `JULIATIMCP_IDLE_TIMEOUT_SECS` | 3600 | Terminate idle sessions (and their workers) after this many seconds. Set to 0 to disable. |
+
+Set via `mux.toml` under `[servers.juliatimcp] env = { ... }` or in a systemd unit's `Environment` line.
 
 ## Multi-session support
 
