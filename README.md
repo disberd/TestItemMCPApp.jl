@@ -67,14 +67,6 @@ Differences from upstream, newest first:
 | Tool schema fixes (`mode` enum, `rerun_failed` parameter gaps, duration units) and new tools (`julia_env`, `log_level`, `get_process_output`, `terminate_all_processes`) | [#2](https://github.com/disberd/TestItemMCPApp.jl/pull/2) |
 | General-registry compatibility (resolve deps from General + GithubSatcomRegistry) | [#1](https://github.com/disberd/TestItemMCPApp.jl/pull/1) |
 
-## Configuration
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `JULIATIMCP_IDLE_TIMEOUT_SECS` | 3600 | Terminate idle sessions (and their workers) after this many seconds. Set to 0 to disable. |
-
-Set via `mux.toml` under `[servers.juliatimcp] env = { ... }` or in a systemd unit's `Environment` line.
-
 ## Multi-session support
 
 The server supports multiple concurrent sessions within a single process,
@@ -84,7 +76,8 @@ and run history; sessions created with the same workspace folders (and no
 explicit `session_id`) share a controller and its worker process pool.
 Each test run defaults to 1 worker process to keep memory usage low on a
 shared server; pass `max_workers` to `run_testitems` when parallelism is
-needed.
+needed. Idle sessions are automatically removed after 1 hour
+(`JULIATIMCP_IDLE_TIMEOUT_SECS` env var, 0 to disable).
 
 Every tool accepts an optional `session_id` parameter.
 When only one session is active it is selected automatically,
