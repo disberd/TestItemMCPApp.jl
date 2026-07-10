@@ -55,6 +55,8 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
         end
     end
 
+    session.last_active = time()
+
     jw = JuliaWorkspaces.workspace_from_folders(folders)
     lock(session.lock) do
         session.workspace = jw
