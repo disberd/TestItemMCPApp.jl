@@ -149,13 +149,16 @@ function get_item_label(session::SessionState, testrun_id::String, testitem_id::
 end
 
 function init_controller!(state::AppState, session::SessionState)
-    if session.controller !== nothing
-        return  # Already initialized
+    created = lock(session.lock) do
+        session.controller !== nothing && return false
+        callbacks = create_controller_callbacks(state, session)
+        session.controller = TestItemControllers.TestItemController(callbacks; log_level=:Info)
+        session.reactor_task = @async Base.run(session.controller)
+        return true
     end
-    callbacks = create_controller_callbacks(state, session)
-    session.controller = TestItemControllers.TestItemController(callbacks; log_level=:Info)
-    session.reactor_task = @async Base.run(session.controller)
-    mcp_notice(state, "transport", "TestItemController initialized for session $(session.id)")
+    if created
+        mcp_notice(state, "transport", "TestItemController initialized for session $(session.id)")
+    end
 end
 
 function shutdown_controller!(session::SessionState)

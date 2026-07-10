@@ -17,7 +17,10 @@ function run_server(input::IO, output::IO)
             @error "Server error" exception = (e, catch_backtrace())
         end
     finally
-        for session in values(state.sessions)
+        sessions_snapshot = lock(state.lock) do
+            collect(values(state.sessions))
+        end
+        for session in sessions_snapshot
             shutdown_controller!(session)
         end
         try
@@ -80,7 +83,14 @@ function dispatch_mcp_message(state::AppState, endpoint::JSONRPC.JSONRPCEndpoint
         else
             arguments = Dict{String,Any}()
         end
-        result = handle_tool_call(state, tool_name, arguments)
+        result = try
+            handle_tool_call(state, tool_name, arguments)
+        catch e
+            Dict{String,Any}(
+                "content" => [Dict{String,Any}("type" => "text", "text" => sprint(showerror, e))],
+                "isError" => true,
+            )
+        end
         JSONRPC.send_success_response(endpoint, msg, result)
         return
     end

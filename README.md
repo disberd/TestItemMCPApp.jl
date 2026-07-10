@@ -70,8 +70,8 @@ Differences from upstream, newest first:
 The server supports multiple concurrent sessions within a single process,
 allowing several MCP clients to share one Julia runtime instead of each
 spawning its own. Each session gets an isolated workspace, test controller,
-and run history; sessions on the same workspace folders share a controller
-and its worker process pool.
+and run history; sessions created with the same workspace folders (and no
+explicit `session_id`) share a controller and its worker process pool.
 
 Every tool accepts an optional `session_id` parameter.
 When only one session is active it is selected automatically,

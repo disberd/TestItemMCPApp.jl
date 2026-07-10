@@ -39,6 +39,9 @@ end
 function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     folders = convert(Vector{String}, args["folders"])
     explicit_id = get(args, "session_id", nothing)
+    if explicit_id !== nothing
+        explicit_id = String(explicit_id)
+    end
     sid = explicit_id !== nothing ? explicit_id : session_key(folders)
 
     mcp_info(state, "tools", "Setting workspace folders for session $sid: $folders")
@@ -50,7 +53,9 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     end
 
     jw = JuliaWorkspaces.workspace_from_folders(folders)
-    session.workspace = jw
+    lock(session.lock) do
+        session.workspace = jw
+    end
 
     # Initialize controller on first workspace setup
     init_controller!(state, session)

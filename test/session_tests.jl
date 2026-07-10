@@ -70,18 +70,12 @@ end
         "session_id" => "session-b",
     ))
 
-    # Without session_id, resolve_session errors inside the tool handler. That
-    # error isn't caught into an `isError` tool result — it escapes dispatch_mcp_message
-    # and gets reported back to the client as a JSON-RPC error response, which
-    # JSONRPC.send_request raises as a JSONRPCError.
-    err = try
-        mcp_call_tool(ep, "list_testitems", Dict{String,Any}())
-        nothing
-    catch e
-        e
-    end
-    @test err isa JSONRPC.JSONRPCError
-    @test occursin("Multiple sessions", err.msg)
+    # Without session_id, resolve_session errors inside the tool handler.
+    # dispatch_mcp_message catches this and returns it as a tool result with
+    # isError=true rather than a JSON-RPC error response.
+    result, raw = mcp_call_tool(ep, "list_testitems", Dict{String,Any}())
+    @test get(raw, "isError", false) == true
+    @test occursin("Multiple sessions", raw["content"][1]["text"])
 
     # With session_id, should work
     items_a, _ = mcp_call_tool(ep, "list_testitems", Dict{String,Any}("session_id" => "session-a"))
