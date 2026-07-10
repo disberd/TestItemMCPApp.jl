@@ -32,7 +32,14 @@ function handle_initialize(state::AppState, params::Dict)
 end
 
 function notify_resource_updated(state::AppState, uri::String)
-    if uri in state.subscriptions
+    subscribed = lock(state.lock) do
+        any(state.sessions) do (_, session)
+            lock(session.lock) do
+                uri in session.subscriptions
+            end
+        end
+    end
+    if subscribed
         try
             JSONRPC.send_notification(state.endpoint, "notifications/resources/updated", Dict{String,Any}(
                 "uri" => uri,

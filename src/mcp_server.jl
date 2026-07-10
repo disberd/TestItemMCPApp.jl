@@ -17,7 +17,9 @@ function run_server(input::IO, output::IO)
             @error "Server error" exception = (e, catch_backtrace())
         end
     finally
-        shutdown_controller!(state)
+        for session in values(state.sessions)
+            shutdown_controller!(session)
+        end
         try
             close(endpoint)
         catch
