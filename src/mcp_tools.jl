@@ -270,5 +270,13 @@ function tool_definitions()
                 "properties" => merge(Dict{String,Any}(), session_id_prop),
             ),
         ),
+        Dict{String,Any}(
+            "name" => "close_session",
+            "description" => "Close a session and terminate its workers. Call when done with a workspace to free resources.",
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => merge(Dict{String,Any}(), session_id_prop),
+            ),
+        ),
     ]
 end
