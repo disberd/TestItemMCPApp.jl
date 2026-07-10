@@ -59,6 +59,12 @@ function dynamic_resources(state::AppState)
     return res
 end
 
+function session_by_id(state::AppState, sid::AbstractString)
+    lock(state.lock) do
+        get(state.sessions, sid, nothing)
+    end
+end
+
 function find_session_for_testrun(state::AppState, testrun_id::String)
     lock(state.lock) do
         for (_, session) in state.sessions
@@ -89,11 +95,8 @@ function read_resource(state::AppState, uri::String)
     # workspace://{session_id}/testitems
     m = match(r"^workspace://([^/]+)/testitems$", uri)
     if m !== nothing
-        sid = m[1]
-        session = lock(state.lock) do
-            get(state.sessions, sid, nothing)
-        end
-        session === nothing && error("Unknown session: $sid")
+        session = session_by_id(state, m[1])
+        session === nothing && error("Unknown session: $(m[1])")
         items = collect_testitems_list(session)
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(items))]
     end
@@ -101,11 +104,8 @@ function read_resource(state::AppState, uri::String)
     # workspace://{session_id}/detection-errors
     m = match(r"^workspace://([^/]+)/detection-errors$", uri)
     if m !== nothing
-        sid = m[1]
-        session = lock(state.lock) do
-            get(state.sessions, sid, nothing)
-        end
-        session === nothing && error("Unknown session: $sid")
+        session = session_by_id(state, m[1])
+        session === nothing && error("Unknown session: $(m[1])")
         errors = collect_detection_errors(session)
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(errors))]
     end
@@ -178,59 +178,33 @@ function read_resource(state::AppState, uri::String)
     error("Unknown resource URI: $uri")
 end
 
-function handle_resources_subscribe(state::AppState, params::Dict)
-    uri = params["uri"]::String
-    # Subscriptions are session-scoped for workspace URIs, but testrun URIs
-    # are globally unique so we store on the matching session.
+function modify_subscription(state::AppState, uri::String, op::Function)
     m = match(r"^workspace://([^/]+)/", uri)
     if m !== nothing
-        sid = m[1]
-        session = lock(state.lock) do
-            get(state.sessions, sid, nothing)
-        end
+        session = session_by_id(state, m[1])
         if session !== nothing
             lock(session.lock) do
-                push!(session.subscriptions, uri)
+                op(session.subscriptions, uri)
             end
         end
         return Dict{String,Any}()
     end
-    # For testrun URIs, find the session and subscribe there
     m_run = match(r"^testrun://([^/]+)/", uri)
     if m_run !== nothing
         session = find_session_for_testrun(state, m_run[1])
         if session !== nothing
             lock(session.lock) do
-                push!(session.subscriptions, uri)
+                op(session.subscriptions, uri)
             end
         end
     end
     return Dict{String,Any}()
 end
 
+function handle_resources_subscribe(state::AppState, params::Dict)
+    modify_subscription(state, params["uri"]::String, push!)
+end
+
 function handle_resources_unsubscribe(state::AppState, params::Dict)
-    uri = params["uri"]::String
-    m = match(r"^workspace://([^/]+)/", uri)
-    if m !== nothing
-        sid = m[1]
-        session = lock(state.lock) do
-            get(state.sessions, sid, nothing)
-        end
-        if session !== nothing
-            lock(session.lock) do
-                delete!(session.subscriptions, uri)
-            end
-        end
-        return Dict{String,Any}()
-    end
-    m_run = match(r"^testrun://([^/]+)/", uri)
-    if m_run !== nothing
-        session = find_session_for_testrun(state, m_run[1])
-        if session !== nothing
-            lock(session.lock) do
-                delete!(session.subscriptions, uri)
-            end
-        end
-    end
-    return Dict{String,Any}()
+    modify_subscription(state, params["uri"]::String, delete!)
 end
