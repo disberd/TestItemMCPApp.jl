@@ -162,11 +162,14 @@ function init_controller!(state::AppState, session::SessionState)
 end
 
 function shutdown_controller!(session::SessionState)
-    session.controller === nothing && return
-    TestItemControllers.shutdown(session.controller)
-    if session.reactor_task !== nothing
-        TestItemControllers.wait_for_shutdown(session.controller, session.reactor_task)
+    ctrl, task = lock(session.lock) do
+        c = session.controller
+        t = session.reactor_task
+        session.controller = nothing
+        session.reactor_task = nothing
+        (c, t)
     end
-    session.controller = nothing
-    session.reactor_task = nothing
+    ctrl === nothing && return
+    TestItemControllers.shutdown(ctrl)
+    task !== nothing && TestItemControllers.wait_for_shutdown(ctrl, task)
 end

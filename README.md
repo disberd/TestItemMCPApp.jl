@@ -52,6 +52,7 @@ Restart the Claude Code session after adding. The server exposes these tools:
 | `terminate_all_processes` | Kill all workers (for Revise-incompatible changes) |
 | `get_process_output` | Retrieve process-level stdout/stderr |
 | `get_coverage_results` | Retrieve coverage data (`mode="Coverage"`) |
+| `close_session` | Close a session and free its workers |
 | `update_file` | Notify the server of a file change on disk |
 
 ## Changes from upstream
@@ -61,6 +62,7 @@ Differences from upstream, newest first:
 
 | Change | PR |
 |--------|----|
+| Resource conservation — default `max_workers=1`, idle session reaper, `close_session` tool | [#4](https://github.com/disberd/TestItemMCPApp.jl/pull/4) |
 | Multi-session support — multiple clients share one Julia process via an external mux (see below) | [#3](https://github.com/disberd/TestItemMCPApp.jl/pull/3) |
 | Tool schema fixes (`mode` enum, `rerun_failed` parameter gaps, duration units) and new tools (`julia_env`, `log_level`, `get_process_output`, `terminate_all_processes`) | [#2](https://github.com/disberd/TestItemMCPApp.jl/pull/2) |
 | General-registry compatibility (resolve deps from General + GithubSatcomRegistry) | [#1](https://github.com/disberd/TestItemMCPApp.jl/pull/1) |
@@ -72,6 +74,10 @@ allowing several MCP clients to share one Julia runtime instead of each
 spawning its own. Each session gets an isolated workspace, test controller,
 and run history; sessions created with the same workspace folders (and no
 explicit `session_id`) share a controller and its worker process pool.
+Each test run defaults to 1 worker process to keep memory usage low on a
+shared server; pass `max_workers` to `run_testitems` when parallelism is
+needed. Idle sessions are automatically removed after 1 hour
+(`JULIATIMCP_IDLE_TIMEOUT_SECS` env var, 0 to disable).
 
 Every tool accepts an optional `session_id` parameter.
 When only one session is active it is selected automatically,

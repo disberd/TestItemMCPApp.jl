@@ -11,6 +11,7 @@ mutable struct SessionState
     subscriptions::Set{String}
     cancellation_sources::Dict{String,CancellationTokens.CancellationTokenSource}  # testrun_id → cts
     test_env_by_id::Dict{String,TestItemControllers.TestEnvironment}
+    const last_active::Threads.Atomic{Float64}
     lock::ReentrantLock
 end
 
@@ -26,6 +27,7 @@ function SessionState(id::String)
         Set{String}(),
         Dict{String,CancellationTokens.CancellationTokenSource}(),
         Dict{String,TestItemControllers.TestEnvironment}(),
+        Threads.Atomic{Float64}(time()),
         ReentrantLock(),
     )
 end
@@ -52,17 +54,24 @@ end
 
 function resolve_session(state::AppState, args::Dict{String,Any})
     session_id = get(args, "session_id", nothing)
-    if session_id !== nothing
-        session = lock(state.lock) do
+    session = if session_id !== nothing
+        s = lock(state.lock) do
             get(state.sessions, session_id, nothing)
         end
-        session === nothing && error("Unknown session: $session_id")
-        return session
+        s === nothing && error("Unknown session: $session_id")
+        s
+    else
+        lock(state.lock) do
+            n = length(state.sessions)
+            if n == 0
+                error("No workspace configured. Call set_workspace_folders first.")
+            elseif n == 1
+                first(values(state.sessions))
+            else
+                error("Multiple sessions active ($(join(keys(state.sessions), ", "))). Pass session_id to disambiguate.")
+            end
+        end
     end
-    lock(state.lock) do
-        n = length(state.sessions)
-        n == 0 && error("No workspace configured. Call set_workspace_folders first.")
-        n == 1 && return first(values(state.sessions))
-        error("Multiple sessions active ($(join(keys(state.sessions), ", "))). Pass session_id to disambiguate.")
-    end
+    session.last_active[] = time()
+    return session
 end

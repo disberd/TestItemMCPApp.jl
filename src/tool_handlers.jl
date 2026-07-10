@@ -29,6 +29,8 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
         return tool_get_process_output(state, arguments)
     elseif tool_name == "terminate_all_processes"
         return tool_terminate_all_processes(state, arguments)
+    elseif tool_name == "close_session"
+        return tool_close_session(state, arguments)
     else
         error("Unknown tool: $tool_name")
     end
@@ -77,6 +79,7 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     end
     text *= "."
 
+    session.last_active[] = time()
     return tool_result_text(text)
 end
 
@@ -435,6 +438,20 @@ function tool_terminate_all_processes(state::AppState, args::Dict{String,Any})
         TestItemControllers.terminate_test_process(session.controller, pid)
     end
     return tool_result_text("Terminated $(length(process_ids)) process(es).")
+end
+
+# --- close_session ---
+
+function tool_close_session(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
+    sid = session.id
+    removed = lock(state.lock) do
+        pop!(state.sessions, sid, nothing)
+    end
+    removed === nothing && return tool_result_text("Session $sid already closed.")
+    shutdown_controller!(removed)
+    mcp_info(state, "tools", "Session $sid closed")
+    return tool_result_text("Session $sid closed.")
 end
 
 # --- Helpers ---

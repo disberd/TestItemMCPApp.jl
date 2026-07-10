@@ -106,7 +106,7 @@ function tool_definitions()
                     ),
                     "max_workers" => Dict{String,Any}(
                         "type" => "integer",
-                        "description" => "Maximum number of parallel test processes (default: min(CPU_THREADS, 8)).",
+                        "description" => "Maximum number of parallel test processes (default: 1).",
                     ),
                     "mode" => Dict{String,Any}(
                         "type" => "string",
@@ -265,6 +265,14 @@ function tool_definitions()
         Dict{String,Any}(
             "name" => "terminate_all_processes",
             "description" => "Terminate all active test worker processes. Use after code changes that Revise cannot hot-reload (struct redefinitions, module-level constants, __init__ changes).",
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => merge(Dict{String,Any}(), session_id_prop),
+            ),
+        ),
+        Dict{String,Any}(
+            "name" => "close_session",
+            "description" => "Close a session and terminate its workers. Call when done with a workspace to free resources.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
                 "properties" => merge(Dict{String,Any}(), session_id_prop),
