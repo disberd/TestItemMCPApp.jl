@@ -8,14 +8,11 @@
         JSONRPC.start(ep)
         mcp_initialize!(ep)
 
-        mcp_call_tool(ep, "set_workspace_folders", Dict{String,Any}(
+        result, _ = mcp_call_tool(ep, "set_workspace_folders", Dict{String,Any}(
             "folders" => [FIXTURE_PKG_PATH],
             "session_id" => "reaper-test",
         ))
-
-        # Confirm session exists
-        items, _ = mcp_call_tool(ep, "list_testitems", Dict{String,Any}("session_id" => "reaper-test"))
-        @test items isa AbstractVector
+        @test occursin("session=reaper-test", result)
 
         # Wait for idle timeout + reaper sweep (timeout=5, interval=max(1,5÷4)=1)
         sleep(8)
