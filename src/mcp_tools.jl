@@ -1,19 +1,25 @@
 # mcp_tools.jl — MCP tool definitions with JSON Schema
 
 function tool_definitions()
+    session_id_prop = Dict{String,Any}(
+        "session_id" => Dict{String,Any}(
+            "type" => "string",
+            "description" => "Session identifier returned by set_workspace_folders. Required when multiple sessions are active.",
+        ),
+    )
     return [
         Dict{String,Any}(
             "name" => "set_workspace_folders",
             "description" => "Set the workspace folders for test item detection. Call this first to configure which Julia packages/projects to scan for @testitem and @testsetup macros. Replaces any previous workspace configuration.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "folders" => Dict{String,Any}(
                         "type" => "array",
                         "items" => Dict{String,Any}("type" => "string"),
                         "description" => "Absolute paths to workspace folders to scan for test items.",
                     ),
-                ),
+                ), session_id_prop),
                 "required" => ["folders"],
             ),
         ),
@@ -22,12 +28,12 @@ function tool_definitions()
             "description" => "Notify the server that a file has changed on disk. Call this after editing source or test files so that test item detection is refreshed.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "path" => Dict{String,Any}(
                         "type" => "string",
                         "description" => "Absolute file path that was changed.",
                     ),
-                ),
+                ), session_id_prop),
                 "required" => ["path"],
             ),
         ),
@@ -36,7 +42,7 @@ function tool_definitions()
             "description" => "List all detected test items, optionally filtered by tags, name pattern, file pattern, or package name.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "tags" => Dict{String,Any}(
                         "type" => "array",
                         "items" => Dict{String,Any}("type" => "string"),
@@ -54,7 +60,7 @@ function tool_definitions()
                         "type" => "string",
                         "description" => "Filter to items in this package only.",
                     ),
-                ),
+                ), session_id_prop),
             ),
         ),
         Dict{String,Any}(
@@ -62,7 +68,7 @@ function tool_definitions()
             "description" => "Run test items. Blocks until all tests complete and returns full results. If no items or filter specified, runs all detected test items. Test processes are reused across runs with Revise-based hot-reload for fast iteration. Duration values in the response are in milliseconds. The timeout parameter is in seconds.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "items" => Dict{String,Any}(
                         "type" => "array",
                         "items" => Dict{String,Any}("type" => "string"),
@@ -126,7 +132,7 @@ function tool_definitions()
                         "enum" => ["Debug", "Info", "Warn", "Error"],
                         "description" => "Minimum log level for test output (default: \"Info\").",
                     ),
-                ),
+                ), session_id_prop),
             ),
         ),
         Dict{String,Any}(
@@ -134,7 +140,7 @@ function tool_definitions()
             "description" => "Re-run only the failed and errored test items from a previous test run.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "testrun_id" => Dict{String,Any}(
                         "type" => "string",
                         "description" => "ID of the previous test run whose failures to re-run.",
@@ -155,7 +161,7 @@ function tool_definitions()
                         "enum" => ["Debug", "Info", "Warn", "Error"],
                         "description" => "Log level override.",
                     ),
-                ),
+                ), session_id_prop),
                 "required" => ["testrun_id"],
             ),
         ),
@@ -164,12 +170,12 @@ function tool_definitions()
             "description" => "Cancel an active test run.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "testrun_id" => Dict{String,Any}(
                         "type" => "string",
                         "description" => "ID of the test run to cancel.",
                     ),
-                ),
+                ), session_id_prop),
                 "required" => ["testrun_id"],
             ),
         ),
@@ -178,7 +184,7 @@ function tool_definitions()
             "description" => "Get results for a completed or in-progress test run. Duration values are in milliseconds.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "testrun_id" => Dict{String,Any}(
                         "type" => "string",
                         "description" => "ID of the test run.",
@@ -191,7 +197,7 @@ function tool_definitions()
                         "type" => "boolean",
                         "description" => "Include passing test items in results (default: false).",
                     ),
-                ),
+                ), session_id_prop),
                 "required" => ["testrun_id"],
             ),
         ),
@@ -200,10 +206,10 @@ function tool_definitions()
             "description" => "Get detailed result for a specific test item in a run, including failure messages, stack traces, and captured output.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "testrun_id" => Dict{String,Any}("type" => "string", "description" => "Test run ID."),
                     "testitem_id" => Dict{String,Any}("type" => "string", "description" => "Test item ID."),
-                ),
+                ), session_id_prop),
                 "required" => ["testrun_id", "testitem_id"],
             ),
         ),
@@ -212,7 +218,7 @@ function tool_definitions()
             "description" => "List all test runs with their status summaries.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(),
+                "properties" => merge(Dict{String,Any}(), session_id_prop),
             ),
         ),
         Dict{String,Any}(
@@ -220,7 +226,7 @@ function tool_definitions()
             "description" => "List active test worker processes managed by the controller.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(),
+                "properties" => merge(Dict{String,Any}(), session_id_prop),
             ),
         ),
         Dict{String,Any}(
@@ -228,9 +234,9 @@ function tool_definitions()
             "description" => "Terminate a specific test worker process.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "process_id" => Dict{String,Any}("type" => "string", "description" => "Process ID to terminate."),
-                ),
+                ), session_id_prop),
                 "required" => ["process_id"],
             ),
         ),
@@ -239,9 +245,9 @@ function tool_definitions()
             "description" => "Get line-level coverage results from a Coverage-mode test run.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "testrun_id" => Dict{String,Any}("type" => "string", "description" => "Test run ID (must have been run with mode=\"Coverage\")."),
-                ),
+                ), session_id_prop),
                 "required" => ["testrun_id"],
             ),
         ),
@@ -250,9 +256,9 @@ function tool_definitions()
             "description" => "Get captured stdout/stderr from a test worker process. This includes startup logs, Revise messages, and output not associated with a specific test item.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(
+                "properties" => merge(Dict{String,Any}(
                     "process_id" => Dict{String,Any}("type" => "string", "description" => "Process ID."),
-                ),
+                ), session_id_prop),
                 "required" => ["process_id"],
             ),
         ),
@@ -261,7 +267,7 @@ function tool_definitions()
             "description" => "Terminate all active test worker processes. Use after code changes that Revise cannot hot-reload (struct redefinitions, module-level constants, __init__ changes).",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
-                "properties" => Dict{String,Any}(),
+                "properties" => merge(Dict{String,Any}(), session_id_prop),
             ),
         ),
     ]
