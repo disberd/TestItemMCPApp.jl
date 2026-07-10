@@ -106,7 +106,7 @@ function tool_definitions()
                     ),
                     "max_workers" => Dict{String,Any}(
                         "type" => "integer",
-                        "description" => "Maximum number of parallel test processes (default: min(CPU_THREADS, 8)).",
+                        "description" => "Maximum number of parallel test processes (default: 1).",
                     ),
                     "mode" => Dict{String,Any}(
                         "type" => "string",
