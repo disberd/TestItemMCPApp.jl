@@ -1,7 +1,7 @@
 # bridge.jl — Map between JuliaWorkspaces and TestItemControllers types
 
-function resolve_testitems(state::AppState; filter=nothing)
-    jw = state.workspace
+function resolve_testitems(session::SessionState; filter=nothing)
+    jw = session.workspace
     jw === nothing && error("Workspace not configured. Call set_workspace_folders first.")
 
     items = TestItemControllers.TestItemDetail[]
@@ -139,8 +139,8 @@ function build_test_environments(params::Dict{String,Any}, item_package_info::Di
     return test_envs, env_id_for_item, max_processes, coverage_root_uris, log_level
 end
 
-function collect_detection_errors(state::AppState)
-    jw = state.workspace
+function collect_detection_errors(session::SessionState)
+    jw = session.workspace
     jw === nothing && return Any[]
     errors = Any[]
     for (uri, file_info) in pairs(JuliaWorkspaces.get_test_items(jw))
@@ -157,8 +157,8 @@ function collect_detection_errors(state::AppState)
     return errors
 end
 
-function collect_testitems_list(state::AppState; filter=nothing)
-    jw = state.workspace
+function collect_testitems_list(session::SessionState; filter=nothing)
+    jw = session.workspace
     jw === nothing && return Any[]
     result = Any[]
     for (uri, file_info) in pairs(JuliaWorkspaces.get_test_items(jw))

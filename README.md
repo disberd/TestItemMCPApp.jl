@@ -54,12 +54,36 @@ Restart the Claude Code session after adding. The server exposes these tools:
 | `get_coverage_results` | Retrieve coverage data (`mode="Coverage"`) |
 | `update_file` | Notify the server of a file change on disk |
 
-## Upstream
+## Changes from upstream
 
-Fork of [julia-testitems/TestItemMCPApp.jl](https://github.com/julia-testitems/TestItemMCPApp.jl),
-with fixes to tool schemas (mode enum, `rerun_failed` parameter gaps, duration
-units) and additional features (`julia_env`, `log_level`, `get_process_output`,
-`terminate_all_processes`) not yet available upstream.
+Fork of [julia-testitems/TestItemMCPApp.jl](https://github.com/julia-testitems/TestItemMCPApp.jl).
+Differences from upstream, newest first:
+
+| Change | PR |
+|--------|----|
+| Multi-session support — multiple clients share one Julia process via an external mux (see below) | [#3](https://github.com/disberd/TestItemMCPApp.jl/pull/3) |
+| Tool schema fixes (`mode` enum, `rerun_failed` parameter gaps, duration units) and new tools (`julia_env`, `log_level`, `get_process_output`, `terminate_all_processes`) | [#2](https://github.com/disberd/TestItemMCPApp.jl/pull/2) |
+| General-registry compatibility (resolve deps from General + GithubSatcomRegistry) | [#1](https://github.com/disberd/TestItemMCPApp.jl/pull/1) |
+
+## Multi-session support
+
+The server supports multiple concurrent sessions within a single process,
+allowing several MCP clients to share one Julia runtime instead of each
+spawning its own. Each session gets an isolated workspace, test controller,
+and run history; sessions created with the same workspace folders (and no
+explicit `session_id`) share a controller and its worker process pool.
+
+Every tool accepts an optional `session_id` parameter.
+When only one session is active it is selected automatically,
+preserving full backward compatibility with single-client setups.
+
+Because the server uses stdio transport, an external MCP multiplexer is
+required to fan multiple client connections into the single pipe.
+[rmcp-mux](https://github.com/VetCoders/rmcp-mux) (Rust, headless CLI
+daemon) is a good fit — it provides request-ID rewriting, init-response
+caching, and a stdio proxy shim so each MCP host connects as usual.
+Adding an HTTP transport directly to the server is planned but not yet
+implemented.
 
 ## Note
 

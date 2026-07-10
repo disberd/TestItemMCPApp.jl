@@ -38,22 +38,39 @@ end
 
 function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     folders = convert(Vector{String}, args["folders"])
-    mcp_info(state, "tools", "Setting workspace folders: $folders")
+    explicit_id = get(args, "session_id", nothing)
+    if explicit_id !== nothing
+        explicit_id = String(explicit_id)
+        if !occursin(r"^[A-Za-z0-9._-]+$", explicit_id)
+            return tool_result_error("session_id must contain only alphanumeric characters, '.', '_', or '-': $(explicit_id)")
+        end
+    end
+    sid = explicit_id !== nothing ? explicit_id : session_key(folders)
+
+    mcp_info(state, "tools", "Setting workspace folders for session $sid: $folders")
+
+    session = lock(state.lock) do
+        get!(state.sessions, sid) do
+            SessionState(sid)
+        end
+    end
 
     jw = JuliaWorkspaces.workspace_from_folders(folders)
-    state.workspace = jw
+    lock(session.lock) do
+        session.workspace = jw
+    end
 
     # Initialize controller on first workspace setup
-    init_controller!(state)
+    init_controller!(state, session)
 
-    items = collect_testitems_list(state)
-    errors = collect_detection_errors(state)
+    items = collect_testitems_list(session)
+    errors = collect_detection_errors(session)
 
     notify_resource_list_changed(state)
-    notify_resource_updated(state, "workspace://testitems")
-    notify_resource_updated(state, "workspace://detection-errors")
+    notify_resource_updated(state, "workspace://$(sid)/testitems")
+    notify_resource_updated(state, "workspace://$(sid)/detection-errors")
 
-    text = "Workspace configured with $(length(folders)) folder(s). " *
+    text = "Workspace configured (session=$(sid)) with $(length(folders)) folder(s). " *
            "Detected $(length(items)) test item(s)"
     if !isempty(errors)
         text *= " and $(length(errors)) detection error(s)"
@@ -66,14 +83,15 @@ end
 # --- update_file ---
 
 function tool_update_file(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     path = args["path"]::String
-    jw = state.workspace
+    jw = session.workspace
     jw === nothing && return tool_result_error("Workspace not configured. Call set_workspace_folders first.")
 
     JuliaWorkspaces.update_file_from_disc!(jw, path)
 
-    notify_resource_updated(state, "workspace://testitems")
-    notify_resource_updated(state, "workspace://detection-errors")
+    notify_resource_updated(state, "workspace://$(session.id)/testitems")
+    notify_resource_updated(state, "workspace://$(session.id)/detection-errors")
 
     return tool_result_text("File updated: $path")
 end
@@ -81,10 +99,11 @@ end
 # --- list_testitems ---
 
 function tool_list_testitems(state::AppState, args::Dict{String,Any})
-    state.workspace === nothing && return tool_result_error("Workspace not configured. Call set_workspace_folders first.")
+    session = resolve_session(state, args)
+    session.workspace === nothing && return tool_result_error("Workspace not configured. Call set_workspace_folders first.")
 
     filter = build_filter(args)
-    items = collect_testitems_list(state; filter=filter)
+    items = collect_testitems_list(session; filter=filter)
 
     return tool_result_json(items)
 end
@@ -92,12 +111,13 @@ end
 # --- run_testitems ---
 
 function tool_run_testitems(state::AppState, args::Dict{String,Any})
-    state.workspace === nothing && return tool_result_error("Workspace not configured. Call set_workspace_folders first.")
+    session = resolve_session(state, args)
+    session.workspace === nothing && return tool_result_error("Workspace not configured. Call set_workspace_folders first.")
 
-    init_controller!(state)
+    init_controller!(state, session)
 
     filter = build_filter(args)
-    items, setups, item_package_info = resolve_testitems(state; filter=filter)
+    items, setups, item_package_info = resolve_testitems(session; filter=filter)
 
     if isempty(items)
         return tool_result_text("No test items matched the given filter.")
@@ -107,9 +127,9 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
     testrun_id = test_envs[1].id
 
     # Register test environments for on_process_created callback
-    lock(state.lock) do
+    lock(session.lock) do
         for env in test_envs
-            state.test_env_by_id[env.id] = env
+            session.test_env_by_id[env.id] = env
         end
     end
 
@@ -122,8 +142,8 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
 
     # Create cancellation source
     cts = CancellationTokens.CancellationTokenSource()
-    lock(state.lock) do
-        state.cancellation_sources[testrun_id] = cts
+    lock(session.lock) do
+        session.cancellation_sources[testrun_id] = cts
     end
 
     # Register test run record with pending items
@@ -139,8 +159,8 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
         Dates.now(),
         nothing,
     )
-    lock(state.lock) do
-        state.runs[testrun_id] = run_record
+    lock(session.lock) do
+        session.runs[testrun_id] = run_record
     end
     notify_resource_list_changed(state)
 
@@ -148,7 +168,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
 
     coverage_results = try
         TestItemControllers.execute_testrun(
-            state.controller,
+            session.controller,
             testrun_id,
             test_envs,
             items,
@@ -159,19 +179,19 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
             coverage_root_uris=coverage_root_uris,
         )
     catch e
-        lock(state.lock) do
+        lock(session.lock) do
             run_record.status = :errored
             run_record.completed_at = Dates.now()
         end
         mcp_error(state, "tools", "Test run $testrun_id failed: $e")
         return tool_result_error("Test run failed: $e")
     finally
-        lock(state.lock) do
-            delete!(state.cancellation_sources, testrun_id)
+        lock(session.lock) do
+            delete!(session.cancellation_sources, testrun_id)
         end
     end
 
-    lock(state.lock) do
+    lock(session.lock) do
         run_record.status = :completed
         run_record.completed_at = Dates.now()
         if coverage_results !== nothing
@@ -179,7 +199,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
         end
     end
 
-    summary = lock(state.lock) do
+    summary = lock(session.lock) do
         run_summary(run_record)
     end
 
@@ -189,7 +209,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any})
     mcp_info(state, "tools", "Test run $testrun_id completed: $(summary["passed"]) passed, $(summary["failed"]) failed, $(summary["errored"]) errored")
 
     # Return full results inline so the LLM has everything it needs
-    failures = lock(state.lock) do
+    failures = lock(session.lock) do
         [
             Dict{String,Any}(
                 "testitem_id" => item.testitem_id,
@@ -213,14 +233,15 @@ end
 # --- rerun_failed ---
 
 function tool_rerun_failed(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     testrun_id = args["testrun_id"]::String
 
-    prev_run = lock(state.lock) do
-        get(state.runs, testrun_id, nothing)
+    prev_run = lock(session.lock) do
+        get(session.runs, testrun_id, nothing)
     end
     prev_run === nothing && return tool_result_error("Test run not found: $testrun_id")
 
-    failed_ids = lock(state.lock) do
+    failed_ids = lock(session.lock) do
         [item.testitem_id for item in values(prev_run.items) if item.status in (:failed, :errored)]
     end
     isempty(failed_ids) && return tool_result_text("No failed or errored items in run $testrun_id.")
@@ -241,17 +262,18 @@ end
 # --- cancel_testrun ---
 
 function tool_cancel_testrun(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     testrun_id = args["testrun_id"]::String
 
-    cts = lock(state.lock) do
-        get(state.cancellation_sources, testrun_id, nothing)
+    cts = lock(session.lock) do
+        get(session.cancellation_sources, testrun_id, nothing)
     end
     cts === nothing && return tool_result_error("No active test run with ID: $testrun_id")
 
     CancellationTokens.cancel(cts)
 
-    lock(state.lock) do
-        run = get(state.runs, testrun_id, nothing)
+    lock(session.lock) do
+        run = get(session.runs, testrun_id, nothing)
         if run !== nothing
             run.status = :cancelled
             run.completed_at = Dates.now()
@@ -265,20 +287,21 @@ end
 # --- get_testrun_results ---
 
 function tool_get_testrun_results(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     testrun_id = args["testrun_id"]::String
     include_output = get(args, "include_output", false)::Bool
     include_passing = get(args, "include_passing", false)::Bool
 
-    run = lock(state.lock) do
-        get(state.runs, testrun_id, nothing)
+    run = lock(session.lock) do
+        get(session.runs, testrun_id, nothing)
     end
     run === nothing && return tool_result_error("Test run not found: $testrun_id")
 
-    summary = lock(state.lock) do
+    summary = lock(session.lock) do
         run_summary(run)
     end
 
-    items_out = lock(state.lock) do
+    items_out = lock(session.lock) do
         result = Dict{String,Any}[]
         for item in values(run.items)
             if !include_passing && item.status == :passed
@@ -306,17 +329,18 @@ end
 # --- get_testitem_detail ---
 
 function tool_get_testitem_detail(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     testrun_id = args["testrun_id"]::String
     testitem_id = args["testitem_id"]::String
 
-    item = lock(state.lock) do
-        run = get(state.runs, testrun_id, nothing)
+    item = lock(session.lock) do
+        run = get(session.runs, testrun_id, nothing)
         run === nothing && return nothing
         get(run.items, testitem_id, nothing)
     end
     item === nothing && return tool_result_error("Test item $testitem_id not found in run $testrun_id")
 
-    d = lock(state.lock) do
+    d = lock(session.lock) do
         Dict{String,Any}(
             "testitem_id" => item.testitem_id,
             "label" => item.label,
@@ -334,8 +358,9 @@ end
 # --- list_testruns ---
 
 function tool_list_testruns(state::AppState, args::Dict{String,Any})
-    runs = lock(state.lock) do
-        [run_summary(run) for run in values(state.runs)]
+    session = resolve_session(state, args)
+    runs = lock(session.lock) do
+        [run_summary(run) for run in values(session.runs)]
     end
     return tool_result_json(runs)
 end
@@ -343,7 +368,8 @@ end
 # --- list_test_processes ---
 
 function tool_list_test_processes(state::AppState, args::Dict{String,Any})
-    procs = lock(state.lock) do
+    session = resolve_session(state, args)
+    procs = lock(session.lock) do
         [
             Dict{String,Any}(
                 "id" => p.id,
@@ -351,7 +377,7 @@ function tool_list_test_processes(state::AppState, args::Dict{String,Any})
                 "status" => p.status,
                 "package_uri" => p.package_uri,
                 "project_uri" => p.project_uri,
-            ) for p in values(state.processes)
+            ) for p in values(session.processes)
         ]
     end
     return tool_result_json(procs)
@@ -360,19 +386,21 @@ end
 # --- terminate_test_process ---
 
 function tool_terminate_test_process(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     process_id = args["process_id"]::String
-    state.controller === nothing && return tool_result_error("Controller not initialized.")
-    TestItemControllers.terminate_test_process(state.controller, process_id)
+    session.controller === nothing && return tool_result_error("Controller not initialized.")
+    TestItemControllers.terminate_test_process(session.controller, process_id)
     return tool_result_text("Process $process_id termination requested.")
 end
 
 # --- get_coverage_results ---
 
 function tool_get_coverage_results(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     testrun_id = args["testrun_id"]::String
 
-    coverage = lock(state.lock) do
-        run = get(state.runs, testrun_id, nothing)
+    coverage = lock(session.lock) do
+        run = get(session.runs, testrun_id, nothing)
         run === nothing && return :not_found
         run.coverage === nothing && return :no_coverage
         run.coverage
@@ -386,9 +414,10 @@ end
 # --- get_process_output ---
 
 function tool_get_process_output(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
     process_id = args["process_id"]::String
-    output = lock(state.lock) do
-        get(state.process_outputs, process_id, nothing)
+    output = lock(session.lock) do
+        get(session.process_outputs, process_id, nothing)
     end
     output === nothing && return tool_result_error("No output found for process: $process_id")
     return tool_result_text(join(output, ""))
@@ -397,12 +426,13 @@ end
 # --- terminate_all_processes ---
 
 function tool_terminate_all_processes(state::AppState, args::Dict{String,Any})
-    state.controller === nothing && return tool_result_error("Controller not initialized.")
-    process_ids = lock(state.lock) do
-        collect(keys(state.processes))
+    session = resolve_session(state, args)
+    session.controller === nothing && return tool_result_error("Controller not initialized.")
+    process_ids = lock(session.lock) do
+        collect(keys(session.processes))
     end
     for pid in process_ids
-        TestItemControllers.terminate_test_process(state.controller, pid)
+        TestItemControllers.terminate_test_process(session.controller, pid)
     end
     return tool_result_text("Terminated $(length(process_ids)) process(es).")
 end
