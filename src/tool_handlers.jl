@@ -41,8 +41,8 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     explicit_id = get(args, "session_id", nothing)
     if explicit_id !== nothing
         explicit_id = String(explicit_id)
-        if occursin('/', explicit_id)
-            return tool_result_error("session_id must not contain '/': $(explicit_id)")
+        if !occursin(r"^[A-Za-z0-9._-]+$", explicit_id)
+            return tool_result_error("session_id must contain only alphanumeric characters, '.', '_', or '-': $(explicit_id)")
         end
     end
     sid = explicit_id !== nothing ? explicit_id : session_key(folders)

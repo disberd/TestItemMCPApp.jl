@@ -32,11 +32,12 @@ function handle_initialize(state::AppState, params::Dict)
 end
 
 function notify_resource_updated(state::AppState, uri::String)
-    subscribed = lock(state.lock) do
-        any(state.sessions) do (_, session)
-            lock(session.lock) do
-                uri in session.subscriptions
-            end
+    sessions_snapshot = lock(state.lock) do
+        collect(values(state.sessions))
+    end
+    subscribed = any(sessions_snapshot) do session
+        lock(session.lock) do
+            uri in session.subscriptions
         end
     end
     if subscribed

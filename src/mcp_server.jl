@@ -86,7 +86,11 @@ function dispatch_mcp_message(state::AppState, endpoint::JSONRPC.JSONRPCEndpoint
         result = try
             handle_tool_call(state, tool_name, arguments)
         catch e
-            @error "Tool call error" tool = tool_name exception = (e, catch_backtrace())
+            if e isa ErrorException
+                @debug "Tool call rejected" tool = tool_name message = e.msg
+            else
+                @error "Tool call error" tool = tool_name exception = (e, catch_backtrace())
+            end
             tool_result_error(sprint(showerror, e))
         end
         JSONRPC.send_success_response(endpoint, msg, result)
