@@ -17,8 +17,8 @@
         items, _ = mcp_call_tool(ep, "list_testitems", Dict{String,Any}("session_id" => "reaper-test"))
         @test items isa AbstractVector
 
-        # Wait for idle timeout + one reaper sweep (timeout=2, interval=max(1,2÷4)=1)
-        sleep(4)
+        # Wait for idle timeout + reaper sweeps (timeout=2, interval=1, generous margin for CI)
+        sleep(6)
 
         # Session should be gone — querying it should error
         _, raw = mcp_call_tool(ep, "list_testitems", Dict{String,Any}("session_id" => "reaper-test"))

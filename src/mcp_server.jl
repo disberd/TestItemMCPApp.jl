@@ -9,13 +9,16 @@ function run_server(input::IO, output::IO)
     idle_timeout = parse(Int, get(ENV, "JULIATIMCP_IDLE_TIMEOUT_SECS", "3600"))
     if idle_timeout > 0
         interval = max(1, idle_timeout ÷ 4)
-        @async while true
+        @async while isopen(input)
             sleep(interval)
             try
                 now = time()
                 stale_ids = lock(state.lock) do
                     [sid for (sid, session) in state.sessions
-                     if (now - session.last_active) > idle_timeout]
+                     if (now - session.last_active[]) > idle_timeout &&
+                        lock(session.lock) do
+                            isempty(session.cancellation_sources)
+                        end]
                 end
                 for sid in stale_ids
                     session = lock(state.lock) do

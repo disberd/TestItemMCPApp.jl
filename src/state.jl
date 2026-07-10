@@ -11,7 +11,7 @@ mutable struct SessionState
     subscriptions::Set{String}
     cancellation_sources::Dict{String,CancellationTokens.CancellationTokenSource}  # testrun_id → cts
     test_env_by_id::Dict{String,TestItemControllers.TestEnvironment}
-    last_active::Float64
+    const last_active::Threads.Atomic{Float64}
     lock::ReentrantLock
 end
 
@@ -27,7 +27,7 @@ function SessionState(id::String)
         Set{String}(),
         Dict{String,CancellationTokens.CancellationTokenSource}(),
         Dict{String,TestItemControllers.TestEnvironment}(),
-        time(),
+        Threads.Atomic{Float64}(time()),
         ReentrantLock(),
     )
 end
@@ -72,6 +72,6 @@ function resolve_session(state::AppState, args::Dict{String,Any})
             end
         end
     end
-    session.last_active = time()
+    session.last_active[] = time()
     return session
 end
