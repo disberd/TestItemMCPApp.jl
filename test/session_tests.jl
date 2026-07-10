@@ -132,7 +132,7 @@ end
     tools = mcp_list_tools(ep)
     for tool in tools
         props = tool["inputSchema"]["properties"]
-        @test haskey(props, "session_id") || tool["name"] == "NONE_SHOULD_FAIL"
+        @test haskey(props, "session_id")
     end
 
     close(ep); close(client_socket); close(server_socket)

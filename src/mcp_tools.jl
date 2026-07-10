@@ -10,7 +10,7 @@ function tool_definitions()
     return [
         Dict{String,Any}(
             "name" => "set_workspace_folders",
-            "description" => "Set the workspace folders for test item detection. Call this first to configure which Julia packages/projects to scan for @testitem and @testsetup macros. Replaces any previous workspace configuration.",
+            "description" => "Set the workspace folders for test item detection. Call this first to configure which Julia packages/projects to scan for @testitem and @testsetup macros. Creates or updates a session for the given folders.",
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
                 "properties" => merge(Dict{String,Any}(
