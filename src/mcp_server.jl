@@ -6,6 +6,31 @@ function run_server(input::IO, output::IO)
 
     JSONRPC.start(endpoint)
 
+    idle_timeout = parse(Int, get(ENV, "JULIATIMCP_IDLE_TIMEOUT_SECS", "3600"))
+    if idle_timeout > 0
+        interval = max(1, idle_timeout ÷ 4)
+        @async while true
+            sleep(interval)
+            try
+                now = time()
+                stale_ids = lock(state.lock) do
+                    [sid for (sid, session) in state.sessions
+                     if (now - session.last_active) > idle_timeout]
+                end
+                for sid in stale_ids
+                    session = lock(state.lock) do
+                        pop!(state.sessions, sid, nothing)
+                    end
+                    session === nothing && continue
+                    shutdown_controller!(session)
+                    mcp_info(state, "reaper", "Removed idle session $sid")
+                end
+            catch e
+                @error "Reaper error" exception = (e, catch_backtrace())
+            end
+        end
+    end
+
     mcp_debug(state, "transport", "MCP server started, waiting for initialize request")
 
     try
