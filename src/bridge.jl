@@ -6,7 +6,11 @@ function resolve_testitems(session::SessionState; filter=nothing)
 
     items = TestItemControllers.TestItemDetail[]
     setups = TestItemControllers.TestSetupDetail[]
-    item_package_info = Dict{String, NamedTuple{(:package_name, :package_uri, :project_uri, :env_content_hash), Tuple{String, Union{Nothing,String}, Union{Nothing,String}, Union{Nothing,String}}}}()
+    # Keyed by `(testitem_id, package_uri)`. A test item id is scoped to its package, so the
+    # same package checked out into two folders of one workspace makes the same id from both.
+    # Keyed by the id alone, the second checkout replaces the first. Its test items then run
+    # against the wrong package environment.
+    item_package_info = Dict{Tuple{String,String}, NamedTuple{(:package_name, :package_uri, :project_uri, :env_content_hash), Tuple{String, Union{Nothing,String}, Union{Nothing,String}, Union{Nothing,String}}}}()
 
     for (uri, file_info) in pairs(JuliaWorkspaces.get_test_items(jw))
         env = JuliaWorkspaces.get_test_env(jw, uri)
@@ -32,7 +36,7 @@ function resolve_testitems(session::SessionState; filter=nothing)
                 JuliaWorkspaces.position_at(textfile.content, item.code_range.stop).line,
                 JuliaWorkspaces.position_at(textfile.content, item.code_range.stop).column,
             ))
-            item_package_info[item.id] = (
+            item_package_info[(item.id, env.package_uri === nothing ? "" : string(env.package_uri))] = (
                 package_name = env.package_name,
                 package_uri = env.package_uri === nothing ? nothing : string(env.package_uri),
                 project_uri = env.project_uri === nothing ? nothing : string(env.project_uri),
@@ -112,7 +116,7 @@ function build_test_environments(params::Dict{String,Any}, item_package_info::Di
     end
 
     test_envs = TestItemControllers.TestEnvironment[]
-    env_id_for_item = Dict{String, String}()
+    env_id_for_item = Dict{Tuple{String,String}, String}()
     for (pkg_key, pkg) in unique_packages
         env = TestItemControllers.TestEnvironment(
             string(UUIDs.uuid4()),
@@ -129,9 +133,9 @@ function build_test_environments(params::Dict{String,Any}, item_package_info::Di
             pkg.env_content_hash,
         )
         push!(test_envs, env)
-        for (item_id, item_pkg) in item_package_info
+        for (item_key, item_pkg) in item_package_info
             if something(item_pkg.package_uri, "") == pkg_key
-                env_id_for_item[item_id] = env.id
+                env_id_for_item[item_key] = env.id
             end
         end
     end
