@@ -64,6 +64,7 @@ Differences from upstream, newest first:
 
 | Change | PR |
 |--------|----|
+| Upstream sync — unpin TestItemControllers, port the `(id, package_uri)` fix, add `get_diagnostics` and `format_file` | [#5](https://github.com/disberd/TestItemMCPApp.jl/pull/5) |
 | Resource conservation — default `max_workers=1`, idle session reaper, `close_session` tool | [#4](https://github.com/disberd/TestItemMCPApp.jl/pull/4) |
 | Multi-session support — multiple clients share one Julia process via an external mux (see below) | [#3](https://github.com/disberd/TestItemMCPApp.jl/pull/3) |
 | Tool schema fixes (`mode` enum, `rerun_failed` parameter gaps, duration units) and new tools (`julia_env`, `log_level`, `get_process_output`, `terminate_all_processes`) | [#2](https://github.com/disberd/TestItemMCPApp.jl/pull/2) |
