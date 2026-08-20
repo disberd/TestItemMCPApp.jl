@@ -5,6 +5,10 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
         return tool_set_workspace_folders(state, arguments)
     elseif tool_name == "update_file"
         return tool_update_file(state, arguments)
+    elseif tool_name == "get_diagnostics"
+        return tool_get_diagnostics(state, arguments)
+    elseif tool_name == "format_file"
+        return tool_format_file(state, arguments)
     elseif tool_name == "list_testitems"
         return tool_list_testitems(state, arguments)
     elseif tool_name == "run_testitems"
@@ -34,6 +38,97 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
     else
         error("Unknown tool: $tool_name")
     end
+end
+
+# --- get_diagnostics ---
+
+function tool_get_diagnostics(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
+    jw = session.workspace
+    jw === nothing && return tool_result_error("Workspace not configured. Call set_workspace_folders first.")
+
+    uri = haskey(args, "path") && args["path"] !== nothing ? resolve_uri(args["path"]::String) : nothing
+    if uri !== nothing && !JuliaWorkspaces.has_file(jw, uri)
+        return tool_result_error("File is not part of the workspace: $(args["path"])")
+    end
+
+    result = try
+        collect_diagnostics(
+            session;
+            uri = uri,
+            severity = get(args, "severity", nothing),
+            source = get(args, "source", nothing),
+            max_results = something(get(args, "max_results", nothing), DIAGNOSTIC_LIMIT_DEFAULT),
+            wait_for_ready = something(get(args, "wait_for_ready", nothing), false),
+        )
+    catch err
+        return tool_result_error("Failed to collect diagnostics: $(sprint(showerror, err))")
+    end
+
+    return tool_result_json(result)
+end
+
+# --- format_file ---
+
+function tool_format_file(state::AppState, args::Dict{String,Any})
+    session = resolve_session(state, args)
+    jw = session.workspace
+    jw === nothing && return tool_result_error("Workspace not configured. Call set_workspace_folders first.")
+
+    path = args["path"]::String
+    uri = resolve_uri(path)
+    JuliaWorkspaces.has_file(jw, uri) ||
+        return tool_result_error("File is not part of the workspace: $path")
+
+    start_line = get(args, "start_line", nothing)
+    stop_line = get(args, "stop_line", nothing)
+    if (start_line === nothing) != (stop_line === nothing)
+        return tool_result_error("start_line and stop_line must be supplied together.")
+    end
+
+    edit = try
+        start_line === nothing ?
+            JuliaWorkspaces.get_format_edits(jw, uri) :
+            JuliaWorkspaces.get_format_edits(jw, uri, start_line, stop_line)
+    catch err
+        return tool_result_error("Formatting failed: $(sprint(showerror, err))")
+    end
+
+    # The JuliaFormat.toml configuration can exclude a file. This is not an error.
+    # The file is simply not formatted.
+    if edit === nothing
+        return tool_result_json(Dict{String,Any}(
+            "uri" => string(uri),
+            "edits" => [],
+            "excluded" => true,
+            "already_formatted" => false,
+            "applied" => false,
+        ))
+    end
+
+    result = file_edit_to_dict(edit)
+    result["excluded"] = false
+    result["already_formatted"] = isempty(edit.edits)
+
+    if something(get(args, "apply", nothing), false) && !isempty(edit.edits)
+        file_path = JuliaWorkspaces.uri2filepath(uri)
+        try
+            content = JuliaWorkspaces.get_text_file(jw, uri).content
+            write(file_path, apply_text_edits(content, edit.edits))
+            JuliaWorkspaces.update_file_from_disc!(jw, file_path)
+        catch err
+            return tool_result_error("Failed to write formatted file: $(sprint(showerror, err))")
+        end
+
+        notify_resource_updated(state, "workspace://$(session.id)/testitems")
+        notify_resource_updated(state, "workspace://$(session.id)/detection-errors")
+
+        result["applied"] = true
+    else
+        result["applied"] = false
+    end
+
+    return tool_result_json(result)
 end
 
 # --- set_workspace_folders ---

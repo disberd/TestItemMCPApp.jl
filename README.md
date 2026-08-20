@@ -40,6 +40,8 @@ Restart the Claude Code session after adding. The server exposes these tools:
 | Tool | Purpose |
 |------|---------|
 | `set_workspace_folders` | Point at one or more Julia projects to scan |
+| `get_diagnostics` | Report syntax errors and lint warnings (static, runs no code) |
+| `format_file` | Format a file with the style from the nearest `JuliaFormat.toml` |
 | `list_testitems` | List detected `@testitem` blocks (with optional filters) |
 | `run_testitems` | Run test items (filterable by name, tags, file, package) |
 | `rerun_failed` | Re-run failures from a previous run |

@@ -38,6 +38,72 @@ function tool_definitions()
             ),
         ),
         Dict{String,Any}(
+            "name" => "get_diagnostics",
+            "description" => "Report Julia syntax errors, lint warnings and test item detection errors, for " *
+                             "the whole workspace or a single file. This is static analysis: no Julia code is " *
+                             "run and nothing is compiled, so it is cheap enough to call after every edit. " *
+                             "Prefer it over shelling out to julia to check whether a file parses. Results are " *
+                             "grouped by file with 1-based line/column positions. Requires set_workspace_folders.",
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => merge(Dict{String,Any}(
+                    "path" => Dict{String,Any}(
+                        "type" => "string",
+                        "description" => "Optional absolute file path or file:// URI. When omitted, diagnostics for the whole workspace are returned.",
+                    ),
+                    "severity" => Dict{String,Any}(
+                        "type" => "array",
+                        "items" => Dict{String,Any}("type" => "string"),
+                        "description" => "Only report these severities, e.g. [\"error\"] or [\"error\", \"warning\"].",
+                    ),
+                    "source" => Dict{String,Any}(
+                        "type" => "array",
+                        "items" => Dict{String,Any}("type" => "string"),
+                        "description" => "Only report diagnostics from these sources, e.g. [\"JuliaSyntax.jl\"] or [\"StaticLint.jl\"].",
+                    ),
+                    "max_results" => Dict{String,Any}(
+                        "type" => "integer",
+                        "description" => "Maximum number of diagnostics to return (default $(DIAGNOSTIC_LIMIT_DEFAULT)). The response reports whether it was truncated.",
+                    ),
+                    "wait_for_ready" => Dict{String,Any}(
+                        "type" => "boolean",
+                        "description" => "Wait for environment-dependent analysis (package resolution) to finish first. Slower, but required for checks that need the surrounding environment, such as unresolved imports and missing references \u2014 without it those checks are silently absent.",
+                    ),
+                ), session_id_prop),
+            ),
+        ),
+        Dict{String,Any}(
+            "name" => "format_file",
+            "description" => "Format Julia source code with the style configured by the nearest " *
+                             "JuliaFormat.toml (JuliaFormatter by default, or Runic when style=\"runic\"). " *
+                             "Returns the text edits without touching disk; set apply=true to write them and " *
+                             "refresh the workspace. A file the configuration excludes returns " *
+                             "excluded=true with no edits rather than an error. Requires " *
+                             "set_workspace_folders, and only works on files inside the workspace.",
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => merge(Dict{String,Any}(
+                    "path" => Dict{String,Any}(
+                        "type" => "string",
+                        "description" => "Absolute file path or file:// URI of the file to format.",
+                    ),
+                    "start_line" => Dict{String,Any}(
+                        "type" => "integer",
+                        "description" => "First line to format (1-based, inclusive). Requires stop_line. Formats the whole file when omitted.",
+                    ),
+                    "stop_line" => Dict{String,Any}(
+                        "type" => "integer",
+                        "description" => "Last line to format (1-based, inclusive). Requires start_line.",
+                    ),
+                    "apply" => Dict{String,Any}(
+                        "type" => "boolean",
+                        "description" => "Write the formatted result to disk and refresh the workspace. Defaults to false, which only returns the edits.",
+                    ),
+                ), session_id_prop),
+                "required" => ["path"],
+            ),
+        ),
+        Dict{String,Any}(
             "name" => "list_testitems",
             "description" => "List all detected test items, optionally filtered by tags, name pattern, file pattern, or package name.",
             "inputSchema" => Dict{String,Any}(
