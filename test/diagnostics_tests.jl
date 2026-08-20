@@ -44,6 +44,14 @@ end
     _, raw = mcp_call_tool(ep, "get_diagnostics", Dict{String,Any}("path" => joinpath(LINT_PKG_PATH, "src", "nosuchfile.jl")))
     @test raw["isError"] == true
 
+    # A scoped request must obey wait_for_ready too, not only a workspace-wide request.
+    ready, _ = mcp_call_tool(ep, "get_diagnostics", Dict{String,Any}(
+        "path" => bad_file,
+        "wait_for_ready" => true,
+    ))
+    @test ready["total"] >= scoped["total"]
+    @test all(f -> occursin("badsyntax.jl", f["uri"]), ready["files"])
+
     close(ep); close(client_socket); close(server_socket)
 end
 
