@@ -105,7 +105,14 @@ end
     @test opts.julia_cmd == "julia"
     @test opts.julia_num_threads == "2"
     @test opts.julia_args == ["--check-bounds=yes"]
-    @test JuliaMCP.run_options(Dict{String,Any}()).julia_num_threads === nothing
+    defaults = JuliaMCP.run_options(Dict{String,Any}())
+    @test defaults.julia_num_threads === nothing
+    @test defaults.max_workers == 1
+    @test defaults.log_level === :Info
+    @test JuliaMCP.run_options(Dict{String,Any}("log_level" => "Debug")).log_level === :Debug
+    env = Dict{String,Any}("SET_ME" => "1", "UNSET_ME" => nothing)
+    @test JuliaMCP.run_profile(Dict{String,Any}("julia_env" => env)).env == env
+    @test isempty(JuliaMCP.run_profile(Dict{String,Any}()).env)
 end
 
 @testitem "test processes drop the app shim's Julia env vars" begin

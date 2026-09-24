@@ -51,17 +51,21 @@ end
 
 The one profile a `julia_run_testitems` call runs under. TestItemRuns clears the
 `JULIA_LOAD_PATH`/`JULIA_PROJECT`/`JULIA_DEPOT_PATH` the Pkg app shim launching this
-server pins to its own environment, so test processes resolve their own.
+server pins to its own environment, so test processes resolve their own. The
+`julia_env` argument adds variables to the environment of the test processes. A
+`nothing` value removes the variable.
 """
 function run_profile(params::Dict{String,Any})
     mode = get(params, "mode", "Normal")::String
-    return TIR.RunProfile("Default"; coverage = mode == "Coverage")
+    env = something(get(params, "julia_env", nothing), Dict{String,Any}())
+    return TIR.RunProfile("Default"; coverage = mode == "Coverage", env)
 end
 
 """
     run_options(params) -> NamedTuple
 
-The `run_async!` keyword arguments a `julia_run_testitems` call selects.
+The `run_async!` keyword arguments a `julia_run_testitems` call selects. One test
+process is the default. This keeps the load low when several clients share the server.
 """
 function run_options(params::Dict{String,Any})
     julia_num_threads = let v = get(params, "julia_num_threads", nothing)
@@ -71,7 +75,8 @@ function run_options(params::Dict{String,Any})
         julia_cmd = get(params, "julia_cmd", "julia")::String,
         julia_args = convert(Vector{String}, get(params, "julia_args", String[])),
         julia_num_threads = julia_num_threads,
-        max_workers = Int(get(params, "max_workers", min(Sys.CPU_THREADS, 8))::Integer),
+        max_workers = Int(get(params, "max_workers", 1)::Integer),
+        log_level = Symbol(something(get(params, "log_level", nothing), "Info")::String),
     )
 end
 

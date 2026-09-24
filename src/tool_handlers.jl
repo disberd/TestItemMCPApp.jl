@@ -59,6 +59,10 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
             return tool_list_test_processes(state, arguments)
         elseif tool_name == "julia_terminate_test_process"
             return tool_terminate_test_process(state, arguments)
+        elseif tool_name == "julia_get_process_output"
+            return tool_get_process_output(state, arguments)
+        elseif tool_name == "julia_terminate_all_processes"
+            return tool_terminate_all_processes(state, arguments)
         elseif tool_name == "julia_get_coverage_results"
             return tool_get_coverage_results(state, arguments)
         elseif tool_name == "julia_create_session"
@@ -477,7 +481,7 @@ function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_tok
     new_args = copy(args)
     new_args["items"] = failed_ids
     new_args["workspace_id"] = workspace_id_for(state, workspace)
-    for key in ("julia_cmd", "julia_args", "max_workers", "timeout", "mode", "max_wait_seconds")
+    for key in ("julia_cmd", "julia_args", "max_workers", "timeout", "mode", "max_wait_seconds", "julia_env", "log_level")
         if haskey(prev_run.profile_params, key) && !haskey(new_args, key)
             new_args[key] = prev_run.profile_params[key]
         end
@@ -659,6 +663,36 @@ function tool_terminate_test_process(state::AppState, args::Dict{String,Any})
         TIR.terminate_process!(workspace.session, process_id)
     end
     return tool_result_text("Process $process_id termination requested.")
+end
+
+function tool_get_process_output(state::AppState, args::Dict{String,Any})
+    process_id = args["process_id"]::String
+    workspace = haskey(args, "workspace_id") ?
+        resolve_workspace(state, args) :
+        find_workspace_for_process(state, process_id)
+    workspace === nothing && return tool_result_error("Test process not found: $process_id")
+    output = with_workspace_lock(workspace) do
+        session = workspace.session
+        session === nothing && return nothing
+        any(p -> p.id == process_id, TIR.list_processes(session)) || return nothing
+        TIR.process_output(session, process_id)
+    end
+    output === nothing && return tool_result_error("Test process not found: $process_id")
+    max_output_bytes = something(get(args, "max_output_bytes", nothing), MAX_OUTPUT_BYTES_DEFAULT)
+    text, _, _ = truncate_output([output], max_output_bytes)
+    return tool_result_text(text)
+end
+
+function tool_terminate_all_processes(state::AppState, args::Dict{String,Any})
+    workspace = resolve_workspace(state, args)
+    count = with_workspace_lock(workspace) do
+        session = workspace.session
+        session === nothing && return 0
+        n = length(TIR.list_processes(session))
+        TIR.terminate_all_processes!(session)
+        n
+    end
+    return tool_result_text("Termination requested for $count test process(es).")
 end
 
 # --- get_coverage_results ---

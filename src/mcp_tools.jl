@@ -215,7 +215,17 @@ function tool_definitions()
                     ),
                     "max_workers" => Dict{String,Any}(
                         "type" => "integer",
-                        "description" => "Maximum number of parallel test processes (default: min(CPU_THREADS, 8)).",
+                        "description" => "Maximum number of parallel test processes (default: 1).",
+                    ),
+                    "julia_env" => Dict{String,Any}(
+                        "type" => "object",
+                        "additionalProperties" => Dict{String,Any}("type" => ["string", "null"]),
+                        "description" => "Environment variables for the test processes. A null value removes the variable.",
+                    ),
+                    "log_level" => Dict{String,Any}(
+                        "type" => "string",
+                        "enum" => ["Debug", "Info", "Warn", "Error"],
+                        "description" => "Minimum log level for the code under test (default \"Info\").",
                     ),
                     "mode" => Dict{String,Any}(
                         "type" => "string",
@@ -277,6 +287,16 @@ function tool_definitions()
                     "julia_args" => Dict{String,Any}("type" => "array", "items" => Dict{String,Any}("type" => "string"), "description" => "Julia args override."),
                     "max_workers" => Dict{String,Any}("type" => "integer", "description" => "Max workers override."),
                     "timeout" => Dict{String,Any}("type" => "number", "description" => "Per-item timeout override."),
+                    "julia_env" => Dict{String,Any}(
+                        "type" => "object",
+                        "additionalProperties" => Dict{String,Any}("type" => ["string", "null"]),
+                        "description" => "Environment variables override. A null value removes the variable.",
+                    ),
+                    "log_level" => Dict{String,Any}(
+                        "type" => "string",
+                        "enum" => ["Debug", "Info", "Warn", "Error"],
+                        "description" => "Log level override.",
+                    ),
                     "max_wait_seconds" => Dict{String,Any}("type" => "number", "description" => "Override for how long this call waits before returning the run as still running (default $(MAX_WAIT_SECONDS_DEFAULT))."),
                 ),
                 "required" => ["testrun_id"],
@@ -409,6 +429,34 @@ function tool_definitions()
                     "process_id" => Dict{String,Any}("type" => "string", "description" => "Process ID to terminate."),
                 ),
                 "required" => ["process_id"],
+            ),
+        ),
+        Dict{String,Any}(
+            "name" => "julia_get_process_output",
+            "description" => "Get the raw output of a Julia test worker process: everything it wrote outside " *
+                             "of test items. Precompilation and startup failures show up here.",
+            "annotations" => tool_annotations("Get Julia test worker output"; read_only=true, idempotent=true),
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => Dict{String,Any}(
+                    "process_id" => Dict{String,Any}("type" => "string", "description" => "Process ID, as reported by julia_list_test_processes."),
+                    "max_output_bytes" => Dict{String,Any}(
+                        "type" => "integer",
+                        "description" => "Cap on the returned output (default $(MAX_OUTPUT_BYTES_DEFAULT)). The tail is kept.",
+                    ),
+                ),
+                "required" => ["process_id"],
+            ),
+        ),
+        Dict{String,Any}(
+            "name" => "julia_terminate_all_processes",
+            "description" => "Kill every Julia test worker process of the workspace. The next run starts fresh " *
+                             "workers and pays full Julia startup and precompilation again. Use it when Revise " *
+                             "cannot apply a change or the workers are wedged.",
+            "annotations" => tool_annotations("Terminate all Julia test workers"; destructive=true, idempotent=true),
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => Dict{String,Any}(),
             ),
         ),
         Dict{String,Any}(
@@ -608,6 +656,8 @@ function tool_definitions()
         "julia_list_testruns",
         "julia_list_test_processes",
         "julia_terminate_test_process",
+        "julia_get_process_output",
+        "julia_terminate_all_processes",
         "julia_get_coverage_results",
     ])
     workspace_id_schema = Dict{String,Any}(
