@@ -136,6 +136,24 @@ end
     end
 end
 
+@testitem "a scoped diagnostics request obeys wait_for_ready" setup=[MCPTestHelpers] begin
+    using .MCPTestHelpers
+    using JuliaMCP: JuliaWorkspaces, collect_diagnostics
+
+    # A workspace without the dynamic feature is always ready, so build one with the
+    # feature: its environment is not indexed yet when the request arrives.
+    MCPTestHelpers.with_app_state() do state
+        pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "LintPkg")
+        jw = JuliaWorkspaces.workspace_from_folders([pkg]; dynamic=JuliaWorkspaces.DynamicIndexingOnly)
+        state.workspace = jw
+        uri = JuliaWorkspaces.filepath2uri(joinpath(pkg, "src", "badsyntax.jl"))
+
+        report = collect_diagnostics(state; uri, wait_for_ready=true)
+        @test JuliaWorkspaces.is_ready(jw)
+        @test report["total"] >= 1
+    end
+end
+
 @testitem "diagnostics filters and truncation" setup=[MCPTestHelpers] begin
     using .MCPTestHelpers
 

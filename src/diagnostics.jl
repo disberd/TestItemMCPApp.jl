@@ -84,6 +84,10 @@ function collect_diagnostics(
     entries = Tuple{Any,Any}[]
     with_workspace_lock(state) do
         if uri !== nothing
+            # `get_diagnostic` never waits for the dynamic environment. Drive the workspace
+            # to readiness first, so that a request for one file obeys `wait_for_ready` in
+            # the same way as a request for the whole workspace.
+            wait_for_ready && JuliaWorkspaces.get_diagnostics_blocking(jw)
             for d in JuliaWorkspaces.get_diagnostic(jw, uri)
                 push!(entries, (something(d.uri, uri), d))
             end
