@@ -1,23 +1,45 @@
 # JuliaMCP.jl
 
-[![Project Status: Active - The project has reached a stable, usable state and is being actively developed.](http://www.repostatus.org/badges/latest/active.svg)](http://www.repostatus.org/#active)
+[![Project Status: Active - The project has reached a stable, usable state and is under active development.](http://www.repostatus.org/badges/latest/active.svg)](http://www.repostatus.org/#active)
 [![Build Status](https://github.com/julia-vscode/JuliaMCP.jl/actions/workflows/juliaci.yml/badge.svg?branch=main)](https://github.com/julia-vscode/JuliaMCP.jl/actions/workflows/juliaci.yml)
 [![codecov](https://codecov.io/gh/julia-vscode/JuliaMCP.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/julia-vscode/JuliaMCP.jl)
 
 An [MCP](https://modelcontextprotocol.io) server that gives AI coding agents access to a
 live Julia development environment.
 
-JuliaMCP wraps the same engines that power the Julia VS Code extension —
-[JuliaWorkspaces.jl](https://github.com/julia-vscode/JuliaWorkspaces.jl) for analysis,
+JuliaMCP wraps the same engines that power the Julia VS Code extension
+([JuliaWorkspaces.jl](https://github.com/julia-vscode/JuliaWorkspaces.jl) for analysis,
 [TestItemControllers.jl](https://github.com/julia-testitems/TestItemControllers.jl) for test
 execution, and
 [JuliaSessionControllers.jl](https://github.com/julia-vscode/JuliaSessionControllers.jl) for
-long-lived REPL sessions — and exposes them over stdio as MCP tools and resources. An agent
+long-lived REPL sessions) and exposes them over stdio as MCP tools and resources. An agent
 can therefore lint a file, run a subset of test items, read the resulting failure output, and
 evaluate code in a persistent session, without shelling out to `julia` and scraping stdout.
 
 The server speaks MCP protocol version `2025-03-26`. All logging goes to stderr; stdout
 carries MCP messages exclusively.
+
+## Fork changes
+
+This repository is a fork of [julia-vscode/JuliaMCP.jl](https://github.com/julia-vscode/JuliaMCP.jl).
+To install the fork, give its URL to `Pkg.Apps.add`:
+
+```julia
+using Pkg
+Pkg.Apps.add(url="https://github.com/disberd/TestItemMCPApp.jl")
+```
+
+The fork adds these changes to upstream:
+
+| Change | Commits |
+|--------|---------|
+| Several workspaces in one process, each with its own `workspace_id`, test runs, test processes, resources, and notifications. See [Several clients, one server](#several-clients-one-server). | [`38b4af0`](https://github.com/disberd/TestItemMCPApp.jl/commit/38b4af0ccc645a8b801ba11c02edf23a67b58f09), [`3b7ae29`](https://github.com/disberd/TestItemMCPApp.jl/commit/3b7ae290c36ec17eab3bfb2b44d8ba3f111fc538) |
+| An idle reaper that closes unused workspaces and sessions, and the `julia_close_workspace` tool. | [`b649de8`](https://github.com/disberd/TestItemMCPApp.jl/commit/b649de8bf07bb879fa540b472f3edb08c66d47aa) |
+| Pass-through tools and arguments for TestItemRuns features: `julia_env` and `log_level` on test runs, `julia_get_process_output`, and `julia_terminate_all_processes`. | [`5cfe129`](https://github.com/disberd/TestItemMCPApp.jl/commit/5cfe129c479057b29a7def136e73fa776ef0b8ab) |
+| `max_workers = 1` as the default for a test run, to keep the load low when several clients share the server. Upstream uses `min(Sys.CPU_THREADS, 8)`. | [`5cfe129`](https://github.com/disberd/TestItemMCPApp.jl/commit/5cfe129c479057b29a7def136e73fa776ef0b8ab) |
+| `julia_get_diagnostics` with `path` obeys `wait_for_ready`. The fork also proposes this fix upstream. | [`73da529`](https://github.com/disberd/TestItemMCPApp.jl/commit/73da52949562e5a8851102ac152f9e8ddb189c1f) |
+
+Fork pull requests #1 to #5 targeted the code before JuliaMCP, when the package was `TestItemMCPApp` and the app was `juliatimcp`.
 
 ## Installation
 
@@ -47,7 +69,7 @@ Point an MCP client at the `juliamcp` command. For clients that use the common
 }
 ```
 
-The server starts with no workspace loaded — an agent's first call is normally
+The server starts with no workspace loaded. An agent's first call is normally
 `julia_set_workspace_folders` to tell it which directories to analyse.
 
 ## What it exposes
@@ -57,21 +79,30 @@ The server starts with no workspace loaded — an agent's first call is normally
 Every tool is prefixed `julia_` so a model can tell at a glance that it operates on Julia
 code, even in clients that do not namespace tools by server.
 
-**Workspace** — `julia_set_workspace_folders`
+**Workspace**: `julia_set_workspace_folders`, `julia_close_workspace`
 
-**Code analysis** — `julia_get_diagnostics`, `julia_format_file`
+**Code analysis**: `julia_get_diagnostics`, `julia_format_file`
 
-**Test items** — `julia_list_testitems`, `julia_get_testitem_detail`, `julia_run_testitems`,
+**Test items**: `julia_list_testitems`, `julia_get_testitem_detail`, `julia_run_testitems`,
 `julia_rerun_failed`, `julia_cancel_testrun`, `julia_get_testrun_results`,
 `julia_list_testruns`, `julia_get_coverage_results`, `julia_list_test_processes`,
-`julia_terminate_test_process`
+`julia_terminate_test_process`, `julia_get_process_output`, `julia_terminate_all_processes`
 
 `julia_run_testitems` waits at most `max_wait_seconds` (default 600) and otherwise hands the
 run back with status `"running"`; `julia_get_testrun_results` polls it and
 `julia_cancel_testrun` stops it. The per-item `timeout` is independent and bounds each test
 item rather than the call.
 
-**Sessions** — `julia_create_session`, `julia_eval_code`, `julia_profile_code`,
+`julia_run_testitems` and `julia_rerun_failed` also take `julia_env` and `log_level`.
+`julia_env` sets environment variables for the test processes, and a `null` value removes a
+variable. `log_level` is the minimum log level of the code under test. `julia_rerun_failed`
+uses the values of the original run unless the call gives new values. `max_workers` is 1 by
+default.
+
+The code analysis tools, the test item tools, and `julia_close_workspace` take an optional
+`workspace_id`. See [Several clients, one server](#several-clients-one-server).
+
+**Sessions**: `julia_create_session`, `julia_eval_code`, `julia_profile_code`,
 `julia_get_session_variables`, `julia_list_sessions`, `julia_interrupt_session`,
 `julia_kill_session`
 
@@ -93,15 +124,15 @@ That is `<package>/<path>::<label>`.
 
 The package is `<name>@<first eight hex digits of its uuid>`. Both halves matter: the name is
 what you recognise, and the uuid fragment separates two different packages that happen to
-share a name — a vendored copy sitting beside a dev checkout, say.
+share a name: a vendored copy sitting beside a dev checkout, say.
 
 The path is the file the `@testitem` is defined in, relative to the root of the package it
-belongs to and always written with `/` separators — so an id is identical on Windows and on
+belongs to and always written with `/` separators, so an id is identical on Windows and on
 Linux, and identical in a dev checkout and on a CI runner. (A file with no filesystem path to
 make relative falls back to its full URI, unqualified, since a URI is already unique.)
 
 **An id identifies a test item within its package, not within a workspace.** The *same*
-package checked out into two folders — two worktrees, say — produces the same id from both,
+package checked out into two folders (two worktrees, say) produces the same id from both,
 deliberately. Two checkouts can only be told apart by their location, and location differs
 between a dev checkout and a CI runner, so no single string can be both unique across a
 workspace and portable across machines; the id keeps portability. Where uniqueness matters,
@@ -118,18 +149,48 @@ JUnit XML output are these same ids.
 
 Two test items in one file are not supposed to share a name. If they do, every occurrence of
 that name is suffixed `#1`, `#2`, … so the ids stay unique and each item remains individually
-addressable, and a test item definition error is reported for each of them — visible through
-`julia_get_diagnostics` and the `workspace://detection-errors` resource. Note that this is
+addressable, and a test item definition error is reported for each of them, visible through
+`julia_get_diagnostics` and the `workspace://{workspace_id}/detection-errors` resource. This is
 the one case where ids are not stable: resolving the duplicate renumbers its siblings.
 Duplicate names are a mistake worth fixing rather than a state to persist ids from.
 
 ### Resources
 
-Static resources cover the current workspace state (`workspace://testitems`,
-`workspace://diagnostics`, `workspace://detection-errors`). Dynamic resources are listed as
+Three resources for each workspace cover its current state (`workspace://{workspace_id}/testitems`,
+`workspace://{workspace_id}/diagnostics`, `workspace://{workspace_id}/detection-errors`). Dynamic resources are listed as
 work happens, so an agent can read large output out of band rather than through a tool
 result: `testrun://<id>/summary`, `testprocess://<id>/output`, `session://<id>/info` and
 `session://<id>/output`.
+
+## Several clients, one server
+
+One `juliamcp` process can hold several workspaces. `julia_set_workspace_folders` returns a
+`workspace_id`, which is a hash of the sorted, normalised folder paths. The same folders give
+the same `workspace_id`. A second call with the same folders reuses the workspace and keeps
+its test runs.
+
+A workspace tool finds its workspace with these rules:
+
+- With a `workspace_id`, the tool uses that workspace. An unknown `workspace_id` gives a tool
+  error that lists the workspaces.
+- Without a `workspace_id`, a tool that takes a `testrun_id` or a `process_id` finds the
+  workspace from that id.
+- Without a `workspace_id`, any other tool uses the only workspace. When there are two or more
+  workspaces, the tool gives an error that lists each `workspace_id` with its folders. When
+  there is no workspace, the error tells you to call `julia_set_workspace_folders`.
+
+The server sends resource notifications only for the workspace that changed.
+
+The server closes each workspace and kills each session that no client used for
+`JULIAMCP_IDLE_TIMEOUT_SECS` seconds. The default is `3600`, and `0` turns this off. The
+server keeps a workspace with a running test run, and a session with a queued or running
+request. `julia_close_workspace` closes a workspace at once. It refuses while a test run of
+the workspace is active.
+
+The server reads MCP messages from stdio, so each `juliamcp` process has one client. To
+connect several clients to one process, run it behind an MCP multiplexer such as
+[rmcp-mux](https://github.com/VetCoders/rmcp-mux). rmcp-mux rewrites request ids, keeps the
+response to `initialize`, and gives each client a stdio proxy.
 
 ## Development
 
@@ -140,6 +201,6 @@ Pkg.test("JuliaMCP")
 ```
 
 Tests are written as [test items](https://github.com/julia-testitems/TestItems.jl) and run
-with TestItemRunner. Note that `testdata/` deliberately contains `@testitem`s that are
+with TestItemRunner. `testdata/` deliberately contains `@testitem`s that are
 fixtures for the test suite rather than tests of this package, so `test/runtests.jl` filters
 them out.
