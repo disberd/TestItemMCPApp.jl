@@ -91,16 +91,16 @@ end
     pkg = MCPTestHelpers.copy_testdata("BasicPkg")
 
     MCPTestHelpers.with_mcp_server() do client
-        MCPTestHelpers.call_tool(client, "julia_set_workspace_folders",
-            Dict{String,Any}("folders" => [pkg], "watch_interval" => 0.05))
-        MCPTestHelpers.subscribe(client, "workspace://testitems")
+        id = MCPTestHelpers.workspace_id_from_result(MCPTestHelpers.call_tool(client, "julia_set_workspace_folders",
+            Dict{String,Any}("folders" => [pkg], "watch_interval" => 0.05)))
+        MCPTestHelpers.subscribe(client, "workspace://$id/testitems")
         MCPTestHelpers.drain_notifications(client)
 
         write(joinpath(pkg, "test", "test_notify.jl"), "@testitem \"notify\" begin\n    @test true\nend\n")
 
         msg = MCPTestHelpers.wait_for_notification(client, "notifications/resources/updated"; timeout=20.0)
         @test msg !== nothing
-        @test msg.params["uri"] == "workspace://testitems"
+        @test msg.params["uri"] == "workspace://$id/testitems"
     end
 end
 
@@ -110,9 +110,9 @@ end
     pkg = MCPTestHelpers.copy_testdata("BasicPkg")
 
     MCPTestHelpers.with_mcp_server() do client
-        MCPTestHelpers.call_tool(client, "julia_set_workspace_folders",
-            Dict{String,Any}("folders" => [pkg], "watch_interval" => 0.05))
-        MCPTestHelpers.subscribe(client, "workspace://testitems")
+        id = MCPTestHelpers.workspace_id_from_result(MCPTestHelpers.call_tool(client, "julia_set_workspace_folders",
+            Dict{String,Any}("folders" => [pkg], "watch_interval" => 0.05)))
+        MCPTestHelpers.subscribe(client, "workspace://$id/testitems")
         MCPTestHelpers.drain_notifications(client)
 
         for i in 1:5

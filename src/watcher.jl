@@ -98,11 +98,21 @@ function apply_file_changes!(state::AppState, workspace::Workspace, created, mod
     return applied
 end
 
-function notify_workspace_changed(state::AppState)
+"""
+Notify subscribers that the resources of `workspace` changed.
+"""
+function notify_workspace_updated(state::AppState, workspace::Workspace)
+    id = workspace_id_for(state, workspace)
+    id === nothing && return
+    foreach(uri -> notify_resource_updated(state, uri), workspace_resource_uris(id))
+end
+
+"""
+Notify subscribers that the resource list and the resources of `workspace` changed.
+"""
+function notify_workspace_changed(state::AppState, workspace::Workspace)
     notify_resource_list_changed(state)
-    notify_resource_updated(state, "workspace://testitems")
-    notify_resource_updated(state, "workspace://detection-errors")
-    notify_resource_updated(state, "workspace://diagnostics")
+    notify_workspace_updated(state, workspace)
 end
 
 """
@@ -114,7 +124,7 @@ function handle_file_changes!(state::AppState, workspace::Workspace, created, mo
 
     mcp_debug(state, "watcher",
         "Workspace refreshed: $(length(created)) added, $(length(modified)) changed, $(length(deleted)) removed")
-    notify_workspace_changed(state)
+    notify_workspace_changed(state, workspace)
     return applied
 end
 

@@ -2,11 +2,14 @@
     using .MCPTestHelpers
 
     MCPTestHelpers.with_mcp_server() do client
+        pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
+        id = MCPTestHelpers.workspace_id_from_result(MCPTestHelpers.call_tool(client,
+            "julia_set_workspace_folders", Dict{String,Any}("folders" => [pkg])))
         result = MCPTestHelpers.request(client, "resources/list", Dict{String,Any}())
         uris = [r["uri"] for r in result["resources"]]
 
-        @test "workspace://testitems" in uris
-        @test "workspace://detection-errors" in uris
+        @test "workspace://$id/testitems" in uris
+        @test "workspace://$id/detection-errors" in uris
     end
 end
 
@@ -15,12 +18,13 @@ end
 
     MCPTestHelpers.with_mcp_server() do client
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        MCPTestHelpers.call_tool(client, "julia_set_workspace_folders", Dict{String,Any}("folders" => [pkg]))
+        id = MCPTestHelpers.workspace_id_from_result(MCPTestHelpers.call_tool(client,
+            "julia_set_workspace_folders", Dict{String,Any}("folders" => [pkg])))
 
-        items = MCPTestHelpers.resource_json(MCPTestHelpers.read_resource(client, "workspace://testitems"))
+        items = MCPTestHelpers.resource_json(MCPTestHelpers.read_resource(client, "workspace://$id/testitems"))
         @test length(items) == 7
 
-        errors = MCPTestHelpers.resource_json(MCPTestHelpers.read_resource(client, "workspace://detection-errors"))
+        errors = MCPTestHelpers.resource_json(MCPTestHelpers.read_resource(client, "workspace://$id/detection-errors"))
         @test errors == []
     end
 end
@@ -89,7 +93,7 @@ end
 
         uris = [r["uri"] for r in dynamic_resources(state)]
         @test "testrun://run-9/summary" in uris
-        @test "workspace://testitems" in uris
+        @test "workspace://$(only(keys(state.workspaces)))/testitems" in uris
     end
 end
 
@@ -100,16 +104,17 @@ end
     MCPTestHelpers.with_app_state() do state
         @test isempty(state.subscriptions)
 
-        JuliaMCP.handle_resources_subscribe(state, Dict("uri" => "workspace://testitems"))
-        @test "workspace://testitems" in state.subscriptions
+        uri = "workspace://0123456789abcdef/testitems"
+        JuliaMCP.handle_resources_subscribe(state, Dict("uri" => uri))
+        @test uri in state.subscriptions
 
-        JuliaMCP.handle_resources_unsubscribe(state, Dict("uri" => "workspace://testitems"))
-        @test !("workspace://testitems" in state.subscriptions)
+        JuliaMCP.handle_resources_unsubscribe(state, Dict("uri" => uri))
+        @test !(uri in state.subscriptions)
 
         # Unsubscribing something that was never subscribed must not throw.
-        JuliaMCP.handle_resources_unsubscribe(state, Dict("uri" => "workspace://testitems"))
+        JuliaMCP.handle_resources_unsubscribe(state, Dict("uri" => uri))
         # Notifying an unsubscribed URI is a no-op rather than an error.
-        notify_resource_updated(state, "workspace://testitems")
+        notify_resource_updated(state, uri)
     end
 end
 
@@ -117,14 +122,16 @@ end
     using .MCPTestHelpers
 
     MCPTestHelpers.with_mcp_server() do client
-        MCPTestHelpers.subscribe(client, "workspace://testitems")
+        pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
+        args = Dict{String,Any}("folders" => [pkg])
+        id = MCPTestHelpers.workspace_id_from_result(MCPTestHelpers.call_tool(client, "julia_set_workspace_folders", args))
+        MCPTestHelpers.subscribe(client, "workspace://$id/testitems")
         MCPTestHelpers.drain_notifications(client)
 
-        pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        MCPTestHelpers.call_tool(client, "julia_set_workspace_folders", Dict{String,Any}("folders" => [pkg]))
+        MCPTestHelpers.call_tool(client, "julia_set_workspace_folders", args)
 
         msg = MCPTestHelpers.wait_for_notification(client, "notifications/resources/updated")
         @test msg !== nothing
-        @test msg.params["uri"] == "workspace://testitems"
+        @test msg.params["uri"] == "workspace://$id/testitems"
     end
 end

@@ -207,17 +207,18 @@ end
     end
 end
 
-@testitem "workspace://diagnostics resource" setup=[MCPTestHelpers] begin
+@testitem "workspace diagnostics resource" setup=[MCPTestHelpers] begin
     using .MCPTestHelpers
 
     MCPTestHelpers.with_mcp_server() do client
-        uris = [r["uri"] for r in MCPTestHelpers.request(client, "resources/list", Dict{String,Any}())["resources"]]
-        @test "workspace://diagnostics" in uris
-
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "LintPkg")
-        MCPTestHelpers.call_tool(client, "julia_set_workspace_folders", Dict{String,Any}("folders" => [pkg]))
+        id = MCPTestHelpers.workspace_id_from_result(MCPTestHelpers.call_tool(client,
+            "julia_set_workspace_folders", Dict{String,Any}("folders" => [pkg])))
 
-        report = MCPTestHelpers.resource_json(MCPTestHelpers.read_resource(client, "workspace://diagnostics"))
+        uris = [r["uri"] for r in MCPTestHelpers.request(client, "resources/list", Dict{String,Any}())["resources"]]
+        @test "workspace://$id/diagnostics" in uris
+
+        report = MCPTestHelpers.resource_json(MCPTestHelpers.read_resource(client, "workspace://$id/diagnostics"))
         @test report["total"] >= 1
         @test haskey(report, "by_severity")
     end

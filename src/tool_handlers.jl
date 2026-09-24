@@ -119,10 +119,7 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     items = collect_testitems_list(state; workspace=workspace)
     errors = collect_detection_errors(state; workspace=workspace)
 
-    notify_resource_list_changed(state)
-    notify_resource_updated(state, "workspace://testitems")
-    notify_resource_updated(state, "workspace://detection-errors")
-    notify_resource_updated(state, "workspace://diagnostics")
+    notify_workspace_changed(state, workspace)
 
     text = "Workspace configured with $(length(folders)) folder(s), workspace_id=$id. " *
            "Detected $(length(items)) test item(s)"
@@ -150,9 +147,7 @@ function tool_update_file(state::AppState, args::Dict{String,Any})
         haskey(workspace.watcher_snapshot, path) && (workspace.watcher_snapshot[path] = mtime(path))
     end
 
-    notify_resource_updated(state, "workspace://testitems")
-    notify_resource_updated(state, "workspace://detection-errors")
-    notify_resource_updated(state, "workspace://diagnostics")
+    notify_workspace_updated(state, workspace)
 
     return tool_result_text("File updated: $path")
 end
@@ -241,9 +236,7 @@ function tool_format_file(state::AppState, args::Dict{String,Any})
                 (workspace.watcher_snapshot[file_path] = mtime(file_path))
         end
 
-        notify_resource_updated(state, "workspace://testitems")
-        notify_resource_updated(state, "workspace://detection-errors")
-        notify_resource_updated(state, "workspace://diagnostics")
+        notify_workspace_updated(state, workspace)
 
         result["applied"] = true
     else

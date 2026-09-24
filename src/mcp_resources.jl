@@ -47,15 +47,39 @@ function resource_templates()
             "description" => "Status and environment of a Julia session.",
             "mimeType" => "application/json",
         ),
+        Dict{String,Any}(
+            "uriTemplate" => "workspace://{workspace_id}/testitems",
+            "name" => "Detected Julia Test Items",
+            "description" => "All Julia test items (@testitem blocks) detected in one workspace.",
+            "mimeType" => "application/json",
+        ),
+        Dict{String,Any}(
+            "uriTemplate" => "workspace://{workspace_id}/detection-errors",
+            "name" => "Julia Test Item Detection Errors",
+            "description" => "Errors encountered while detecting Julia test items in one workspace.",
+            "mimeType" => "application/json",
+        ),
+        Dict{String,Any}(
+            "uriTemplate" => "workspace://{workspace_id}/diagnostics",
+            "name" => "Julia Workspace Diagnostics",
+            "description" => "Julia syntax errors and lint warnings across one workspace.",
+            "mimeType" => "application/json",
+        ),
     ]
 end
+
+"""
+The URIs of the resources that show the state of the workspace with `id`.
+"""
+workspace_resource_uris(id::AbstractString) =
+    ["workspace://$id/testitems", "workspace://$id/detection-errors", "workspace://$id/diagnostics"]
 
 function dynamic_resources(state::AppState)
     res = Dict{String,Any}[]
     workspaces, sessions = lock(state.lock) do
-        (collect(values(state.workspaces)), collect(state.sessions))
+        (collect(state.workspaces), collect(state.sessions))
     end
-    for workspace in workspaces
+    for (_, workspace) in workspaces
         runs = lock(state.lock) do
             [(id, run.status) for (id, run) in workspace.runs]
         end
@@ -86,24 +110,30 @@ function dynamic_resources(state::AppState)
             "mimeType" => "text/plain",
         ))
     end
-    push!(res, Dict{String,Any}(
-        "uri" => "workspace://testitems",
-        "name" => "Detected Julia Test Items",
-        "description" => "All Julia test items (@testitem blocks) detected in the current workspace.",
-        "mimeType" => "application/json",
-    ))
-    push!(res, Dict{String,Any}(
-        "uri" => "workspace://detection-errors",
-        "name" => "Julia Test Item Detection Errors",
-        "description" => "Errors encountered while detecting Julia test items.",
-        "mimeType" => "application/json",
-    ))
-    push!(res, Dict{String,Any}(
-        "uri" => "workspace://diagnostics",
-        "name" => "Julia Workspace Diagnostics",
-        "description" => "Julia syntax errors and lint warnings across the current workspace.",
-        "mimeType" => "application/json",
-    ))
+    for (workspace_id, workspace) in sort(workspaces, by=first)
+        folders = with_workspace_lock(workspace) do
+            join(workspace.folders, ", ")
+        end
+        testitems_uri, errors_uri, diagnostics_uri = workspace_resource_uris(workspace_id)
+        push!(res, Dict{String,Any}(
+            "uri" => testitems_uri,
+            "name" => "Detected Julia Test Items ($workspace_id)",
+            "description" => "All Julia test items (@testitem blocks) detected in the workspace with folders: $folders",
+            "mimeType" => "application/json",
+        ))
+        push!(res, Dict{String,Any}(
+            "uri" => errors_uri,
+            "name" => "Julia Test Item Detection Errors ($workspace_id)",
+            "description" => "Errors encountered while detecting Julia test items in the workspace with folders: $folders",
+            "mimeType" => "application/json",
+        ))
+        push!(res, Dict{String,Any}(
+            "uri" => diagnostics_uri,
+            "name" => "Julia Workspace Diagnostics ($workspace_id)",
+            "description" => "Julia syntax errors and lint warnings across the workspace with folders: $folders",
+            "mimeType" => "application/json",
+        ))
+    end
     return res
 end
 
@@ -121,9 +151,9 @@ function handle_resources_read(state::AppState, params::Dict)
     return Dict{String,Any}("contents" => contents)
 end
 
-function resource_workspace(state::AppState, uri::String)
+function resource_workspace(state::AppState, uri::String, id::AbstractString)
     try
-        return resolve_workspace(state, Dict{String,Any}())
+        return resolve_workspace(state, Dict{String,Any}("workspace_id" => id))
     catch err
         err isa WorkspaceResolutionError || rethrow()
         throw(ResourceNotFound(uri, err.message))
@@ -142,22 +172,17 @@ function resource_run(state::AppState, uri::String, run_id::AbstractString)
 end
 
 function read_resource(state::AppState, uri::String)
-    if uri == "workspace://testitems"
-        workspace = resource_workspace(state, uri)
-        items = collect_testitems_list(state; workspace=workspace)
-        return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(items))]
-    end
-
-    if uri == "workspace://detection-errors"
-        workspace = resource_workspace(state, uri)
-        errors = collect_detection_errors(state; workspace=workspace)
-        return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(errors))]
-    end
-
-    if uri == "workspace://diagnostics"
-        workspace = resource_workspace(state, uri)
-        diagnostics = collect_diagnostics(state; workspace=workspace)
-        return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(diagnostics))]
+    m = match(r"^workspace://([^/]+)/(testitems|detection-errors|diagnostics)$", uri)
+    if m !== nothing
+        workspace = resource_workspace(state, uri, m[1])
+        data = if m[2] == "testitems"
+            collect_testitems_list(state; workspace=workspace)
+        elseif m[2] == "detection-errors"
+            collect_detection_errors(state; workspace=workspace)
+        else
+            collect_diagnostics(state; workspace=workspace)
+        end
+        return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(data))]
     end
 
     m = match(r"^testrun://([^/]+)/summary$", uri)
