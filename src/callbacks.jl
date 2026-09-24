@@ -113,13 +113,15 @@ function init_controller!(state::AppState, workspace::Workspace)
 end
 
 function shutdown_controller!(state::AppState, workspace::Workspace)
-    session = workspace.session
-    session === nothing && return
-    close(session)
-    lock(state.lock) do
+    # Take the session under the lock. Then only one caller closes it.
+    session = lock(state.lock) do
+        claimed = workspace.session
         workspace.session = nothing
         empty!(workspace.active_runs)
+        claimed
     end
+    session === nothing || close(session)
+    return
 end
 
 function init_controller!(state::AppState)

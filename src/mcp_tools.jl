@@ -44,6 +44,21 @@ function tool_definitions()
             ),
         ),
         Dict{String,Any}(
+            "name" => "julia_close_workspace",
+            "description" => "Close a Julia workspace when you no longer need it. This stops its test worker " *
+                             "processes and its file tracking, and removes its test run history. It refuses " *
+                             "while a test run of the workspace is active: stop the run with " *
+                             "julia_cancel_testrun or let it finish first. The server also closes a workspace " *
+                             "that no client used for JULIAMCP_IDLE_TIMEOUT_SECS seconds (default " *
+                             "$(IDLE_TIMEOUT_SECS_DEFAULT)). Call julia_set_workspace_folders to load the " *
+                             "folders again.",
+            "annotations" => tool_annotations("Close a Julia workspace"; destructive=true, idempotent=true),
+            "inputSchema" => Dict{String,Any}(
+                "type" => "object",
+                "properties" => Dict{String,Any}(),
+            ),
+        ),
+        Dict{String,Any}(
             "name" => "julia_get_diagnostics",
             "description" => "Report Julia syntax errors, lint warnings and test item detection errors, for " *
                              "the whole workspace or a single file. This is static analysis: no Julia code is " *
@@ -645,6 +660,7 @@ function tool_definitions()
         ),
     ]
     workspace_tools = Set([
+        "julia_close_workspace",
         "julia_get_diagnostics",
         "julia_format_file",
         "julia_list_testitems",

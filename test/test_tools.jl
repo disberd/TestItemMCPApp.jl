@@ -20,6 +20,7 @@
     end
 
     for name in (
+        "julia_close_workspace",
         "julia_get_diagnostics",
         "julia_format_file",
         "julia_list_testitems",

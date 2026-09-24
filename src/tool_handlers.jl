@@ -35,6 +35,8 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
     try
         if tool_name == "julia_set_workspace_folders"
             return tool_set_workspace_folders(state, arguments)
+        elseif tool_name == "julia_close_workspace"
+            return tool_close_workspace(state, arguments)
         elseif tool_name == "julia_update_file"
             return tool_update_file(state, arguments)
         elseif tool_name == "julia_get_diagnostics"
@@ -96,17 +98,18 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     mcp_info(state, "tools", "Setting workspace folders: $folders")
 
     workspace = lock(state.lock) do
-        get!(state.workspaces, id) do
+        found = get!(state.workspaces, id) do
             Workspace(copy(folders))
         end
+        # Mark it as used under the same lock as the lookup. Then the idle reaper cannot
+        # close it before the setup below.
+        found.last_used_at = Dates.now()
+        found
     end
     stop_watcher!(workspace)
     with_workspace_lock(workspace) do
         workspace.folders = copy(folders)
         workspace.workspace = JuliaWorkspaces.workspace_from_folders(folders; scope=WORKSPACE_SCOPE)
-    end
-    lock(state.lock) do
-        workspace.last_used_at = Dates.now()
     end
 
     init_controller!(state, workspace)
@@ -122,6 +125,11 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
 
     items = collect_testitems_list(state; workspace=workspace)
     errors = collect_detection_errors(state; workspace=workspace)
+    # The setup can take a long time. Mark the workspace as used again, so that its idle
+    # time starts at the end of the setup.
+    lock(state.lock) do
+        workspace.last_used_at = Dates.now()
+    end
 
     notify_workspace_changed(state, workspace)
 
@@ -133,6 +141,28 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
     text *= "."
 
     return tool_result_text(text)
+end
+
+# --- close_workspace ---
+
+function tool_close_workspace(state::AppState, args::Dict{String,Any})
+    workspace = resolve_workspace(state, args)
+    id = workspace_id_for(state, workspace)
+    status = id === nothing ? :not_found : close_workspace!(state, id)
+    if status === :active_runs
+        runs = lock(state.lock) do
+            active_run_ids(workspace)
+        end
+        return tool_result_error(
+            "Workspace $id has active test runs: $(join(runs, ", ")). Cancel them with " *
+            "julia_cancel_testrun or wait until they finish. Then call julia_close_workspace again.",
+        )
+    end
+    status === :not_found && return tool_result_text("The workspace is already closed.")
+    mcp_info(state, "tools", "Closed workspace $id")
+    return tool_result_text(
+        "Workspace $id is closed. Its test processes are stopped and its test runs are removed.",
+    )
 end
 
 # --- update_file ---
@@ -379,6 +409,8 @@ function finish_run!(
         stop_heartbeat!(run_record)
         lock(state.lock) do
             delete!(workspace.active_runs, testrun_id)
+            # The idle time of the workspace starts when its run ends.
+            workspace.last_used_at = Dates.now()
         end
     end
 
@@ -861,6 +893,8 @@ function tool_eval_code(state::AppState, args::Dict{String,Any})
     finally
         lock(state.lock) do
             delete!(rec.request_outputs, request_id)
+            # The idle time of the session starts when this evaluation ends.
+            rec.last_used_at = Dates.now()
         end
     end
 end
@@ -948,6 +982,8 @@ function tool_profile_code(state::AppState, args::Dict{String,Any})
     finally
         lock(state.lock) do
             delete!(rec.request_outputs, request_id)
+            # The idle time of the session starts when this profiling ends.
+            rec.last_used_at = Dates.now()
         end
     end
 end

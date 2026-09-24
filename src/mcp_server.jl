@@ -3,8 +3,10 @@
 function run_server(input::IO, output::IO)
     endpoint = JSONRPC.JSONRPCEndpoint(input, output; framing=JSONRPC.NewlineDelimitedFraming())
     state = AppState(endpoint)
+    idle_timeout = idle_timeout_secs()
 
     JSONRPC.start(endpoint)
+    reaper = start_reaper(state, idle_timeout)
 
     mcp_debug(state, "transport", "MCP server started, waiting for initialize request")
 
@@ -17,11 +19,16 @@ function run_server(input::IO, output::IO)
             @error "Server error" exception = (e, catch_backtrace())
         end
     finally
-        workspaces = lock(state.lock) do
-            collect(values(state.workspaces))
+        # Stop the reaper and let a running sweep end first. A sweep must not use the
+        # session controller while the controller shuts down.
+        if reaper !== nothing
+            close(reaper.timer)
+            wait(reaper.task)
         end
-        foreach(stop_watcher!, workspaces)
-        foreach(workspace -> shutdown_controller!(state, workspace), workspaces)
+        ids = lock(state.lock) do
+            collect(keys(state.workspaces))
+        end
+        foreach(id -> close_workspace!(state, id; force=true), ids)
         shutdown_sessions!(state)
         try
             close(endpoint)
