@@ -72,17 +72,19 @@ and filtered by severity and source.
 """
 function collect_diagnostics(
     state::AppState;
+    workspace=nothing,
     uri=nothing,
     severity=nothing,
     source=nothing,
     max_results::Integer=DIAGNOSTIC_LIMIT_DEFAULT,
     wait_for_ready::Bool=false,
 )
-    jw = state.workspace
+    workspace = workspace === nothing ? resolve_workspace(state, Dict{String,Any}()) : workspace
+    jw = workspace.workspace
     jw === nothing && error("Workspace not configured. Call julia_set_workspace_folders first.")
 
     entries = Tuple{Any,Any}[]
-    with_workspace_lock(state) do
+    with_workspace_lock(workspace) do
         if uri !== nothing
             # `get_diagnostic` never waits for the dynamic environment. Drive the workspace
             # to readiness first, so that a request for one file obeys `wait_for_ready` in
@@ -118,7 +120,7 @@ function collect_diagnostics(
     truncated && (entries = entries[1:max_results])
 
     by_file = Dict{String,Vector{Any}}()
-    with_workspace_lock(state) do
+    with_workspace_lock(workspace) do
         for (file_uri, d) in entries
             push!(get!(by_file, string(file_uri), Any[]), diagnostic_to_dict(jw, d, file_uri))
         end

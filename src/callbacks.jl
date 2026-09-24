@@ -1,18 +1,21 @@
 # callbacks.jl — TestItemRuns event sink: MCP notifications, progress and run bookkeeping
 
-# Every event of the session (all runs plus the process pool) arrives here, off the
-# controller's reactor task, one at a time.
-handle_event(state::AppState, ::TIR.RunEvent) = nothing
+handle_event(state::AppState, workspace::Workspace, ::TIR.RunEvent) = nothing
 
-function _run_item(state::AppState, run::TIR.TestRun, item::TIR.TestItem)
-    rec = get(state.runs, run.id, nothing)
+function _run_item(
+    state::AppState,
+    workspace::Workspace,
+    run::TIR.TestRun,
+    item::TIR.TestItem,
+)
+    rec = get(workspace.runs, run.id, nothing)
     rec === nothing && return nothing
     return get(rec.items, item.id, nothing)
 end
 
-function handle_event(state::AppState, ev::TIR.TestItemStarted)
+function handle_event(state::AppState, workspace::Workspace, ev::TIR.TestItemStarted)
     lock(state.lock) do
-        item = _run_item(state, ev.run, ev.item)
+        item = _run_item(state, workspace, ev.run, ev.item)
         item === nothing && return
         item.status = :running
     end
@@ -20,9 +23,9 @@ function handle_event(state::AppState, ev::TIR.TestItemStarted)
     notify_resource_updated(state, "testrun://$(ev.run.id)/summary")
 end
 
-function handle_event(state::AppState, ev::TIR.TestItemFinished)
+function handle_event(state::AppState, workspace::Workspace, ev::TIR.TestItemFinished)
     lock(state.lock) do
-        item = _run_item(state, ev.run, ev.item)
+        item = _run_item(state, workspace, ev.run, ev.item)
         item === nothing && return
         item.status = ev.status
         item.duration = ev.duration
@@ -42,76 +45,90 @@ function handle_event(state::AppState, ev::TIR.TestItemFinished)
     else
         mcp_info(state, "testitem", "Skipped: $label")
     end
-    report_run_progress(state, ev.run.id)
+    report_run_progress(state, workspace, ev.run.id)
     notify_resource_updated(state, "testrun://$(ev.run.id)/summary")
-    ev.status in (:passed, :failed, :errored) && notify_resource_updated(state, "testrun://$(ev.run.id)/failures")
+    ev.status in (:passed, :failed, :errored) &&
+        notify_resource_updated(state, "testrun://$(ev.run.id)/failures")
 end
 
-function handle_event(state::AppState, ev::TIR.OutputAppended)
+function handle_event(state::AppState, workspace::Workspace, ev::TIR.OutputAppended)
     lock(state.lock) do
-        item = _run_item(state, ev.run, ev.item)
+        item = _run_item(state, workspace, ev.run, ev.item)
         item === nothing && return
         push!(item.output, ev.output)
     end
     notify_resource_updated(state, "testrun://$(ev.run.id)/items/$(ev.item.id)/output")
 end
 
-function handle_event(state::AppState, ev::TIR.ProcessCreated)
+function handle_event(state::AppState, workspace::Workspace, ev::TIR.ProcessCreated)
     mcp_notice(state, "controller", "Process created for $(ev.package_name) (id=$(ev.id))")
-    note_run_progress(state, "starting test process for $(ev.package_name)")
+    note_run_progress(state, workspace, "starting test process for $(ev.package_name)")
     notify_resource_list_changed(state)
 end
 
-function handle_event(state::AppState, ev::TIR.ProcessTerminated)
+function handle_event(state::AppState, workspace::Workspace, ev::TIR.ProcessTerminated)
     mcp_notice(state, "controller", "Process terminated (id=$(ev.id))")
     notify_resource_list_changed(state)
 end
 
-function handle_event(state::AppState, ev::TIR.ProcessStatusChanged)
+function handle_event(state::AppState, workspace::Workspace, ev::TIR.ProcessStatusChanged)
     mcp_debug(state, "controller", "Process $(ev.id): $(ev.status)")
-    note_run_progress(state, "test process $(ev.status)")
+    note_run_progress(state, workspace, "test process $(ev.status)")
 end
 
-function handle_event(state::AppState, ev::TIR.ProcessOutput)
+function handle_event(state::AppState, workspace::Workspace, ev::TIR.ProcessOutput)
     mcp_debug(state, "controller", ev.output)
 end
 
-function report_run_progress(state::AppState, testrun_id::String)
+function report_run_progress(state::AppState, workspace::Workspace, testrun_id::String)
     run = lock(state.lock) do
-        get(state.runs, testrun_id, nothing)
+        get(workspace.runs, testrun_id, nothing)
     end
     run === nothing && return
     report_progress!(state, run)
 end
 
-# Process events carry no testrun id, so the note goes to whichever runs are active.
-function note_run_progress(state::AppState, note::String)
+function note_run_progress(state::AppState, workspace::Workspace, note::String)
     lock(state.lock) do
-        for run in values(state.runs)
+        for run in values(workspace.runs)
             run.status === :running && (run.progress_note = note)
         end
     end
 end
 
 """
-    init_controller!(state)
-
-Create the TestItemRuns session (controller, reactor, process pool) on first use. Runs are
-retained without limit: every past run stays addressable as an MCP resource.
+Create the TestItemRuns session for a workspace.
 """
+function init_controller!(state::AppState, workspace::Workspace)
+    created = false
+    lock(state.lock) do
+        session = workspace.session
+        if session === nothing || !isopen(session)
+            workspace.session = TIR.TestSession(; on_event=ev -> handle_event(state, workspace, ev), max_history=nothing)
+            created = true
+        end
+    end
+    created && mcp_notice(state, "transport", "TestItemController initialized")
+    return workspace.session
+end
+
+function shutdown_controller!(state::AppState, workspace::Workspace)
+    session = workspace.session
+    session === nothing && return
+    close(session)
+    lock(state.lock) do
+        workspace.session = nothing
+        empty!(workspace.active_runs)
+    end
+end
+
 function init_controller!(state::AppState)
-    s = state.session
-    s !== nothing && isopen(s) && return
-    state.session = TIR.TestSession(; on_event = ev -> handle_event(state, ev), max_history = nothing)
-    mcp_notice(state, "transport", "TestItemController initialized")
+    return init_controller!(state, resolve_workspace(state, Dict{String,Any}()))
 end
 
 function shutdown_controller!(state::AppState)
-    s = state.session
-    s === nothing && return
-    close(s)
-    state.session = nothing
-    lock(state.lock) do
-        empty!(state.active_runs)
+    workspaces = lock(state.lock) do
+        collect(values(state.workspaces))
     end
+    foreach(workspace -> shutdown_controller!(state, workspace), workspaces)
 end

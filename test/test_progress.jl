@@ -9,7 +9,8 @@
             "b" => TestItemResult("b", "b", "file:///a.jl", :pending, nothing, Any[], String[]),
         )
         run = TestRunRecord("run-1", :running, Dict{String,Any}(), items, nothing, Dates.now(), nothing)
-        state.runs["run-1"] = run
+        workspace = MCPTestHelpers.add_workspace!(state)
+        workspace.runs["run-1"] = run
 
         # Without a token the whole mechanism is inert.
         report_progress!(state, run)
@@ -57,7 +58,8 @@ end
         )
         run = TestRunRecord("run-1", :running, Dict{String,Any}(), items, nothing, Dates.now(), nothing)
         run.progress_token = "tok"
-        state.runs["run-1"] = run
+        workspace = MCPTestHelpers.add_workspace!(state)
+        workspace.runs["run-1"] = run
 
         items["a"].status = :passed
         items["b"].status = :passed

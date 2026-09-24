@@ -16,18 +16,16 @@ end
 # itself, so offering a manual refresh only invites needless calls. It stays routed in
 # `handle_tool_call` for the `watch=false` path.
 function tool_definitions()
-    return [
+    definitions = [
         Dict{String,Any}(
             "name" => "julia_set_workspace_folders",
-            "description" => "Load Julia packages or projects into this server's workspace. This is a " *
-                             "prerequisite for every other Julia workspace tool — julia_get_diagnostics, " *
-                             "julia_format_file, julia_list_testitems and julia_run_testitems all fail until " *
-                             "it has been called. Parses the Julia source under each folder, resolves the " *
-                             "Project.toml/Manifest.toml environments, and detects @testitem and @testsetup " *
-                             "blocks. The workspace then keeps itself up to date as files change on disk, so " *
-                             "nothing needs to be called after editing a file. Calling this again replaces the " *
-                             "previous configuration. Julia sessions (julia_create_session) are separate and " *
-                             "need no workspace.",
+            "description" => "Load Julia packages or projects into a workspace on this server. This is a " *
+                             "prerequisite for every other Julia workspace tool. Parses the Julia source under " *
+                             "each folder, resolves the Project.toml/Manifest.toml environments, and detects " *
+                             "@testitem and @testsetup blocks. The workspace then keeps itself up to date as files " *
+                             "change on disk, so nothing needs to be called after editing a file. Calling this " *
+                             "again rebuilds the workspace for those folders and keeps its run history. Julia sessions " *
+                             "(julia_create_session) are separate and need no workspace.",
             "annotations" => tool_annotations("Set Julia workspace folders"; destructive=true, idempotent=true),
             "inputSchema" => Dict{String,Any}(
                 "type" => "object",
@@ -598,4 +596,28 @@ function tool_definitions()
             ),
         ),
     ]
+    workspace_tools = Set([
+        "julia_get_diagnostics",
+        "julia_format_file",
+        "julia_list_testitems",
+        "julia_run_testitems",
+        "julia_rerun_failed",
+        "julia_cancel_testrun",
+        "julia_get_testrun_results",
+        "julia_get_testitem_detail",
+        "julia_list_testruns",
+        "julia_list_test_processes",
+        "julia_terminate_test_process",
+        "julia_get_coverage_results",
+    ])
+    workspace_id_schema = Dict{String,Any}(
+        "type" => "string",
+        "description" => "Workspace id from julia_set_workspace_folders. Optional when exactly one workspace exists.",
+    )
+    for definition in definitions
+        definition["name"] in workspace_tools ||
+            continue
+        definition["inputSchema"]["properties"]["workspace_id"] = copy(workspace_id_schema)
+    end
+    return definitions
 end

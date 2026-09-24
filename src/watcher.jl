@@ -22,7 +22,7 @@ private walk here would re-add files the scoped workspace walk deliberately
 skipped, and would miss changes in directories it skipped but the workspace did
 not.
 """
-function scan_folders(folders)
+function _scan_folders(folders)
     snapshot = Dict{String,Float64}()
     for folder in folders
         isdir(folder) || continue
@@ -36,6 +36,13 @@ function scan_folders(folders)
         end
     end
     return snapshot
+end
+
+
+function scan_folders(workspace::Workspace)
+    return with_workspace_lock(workspace) do
+        _scan_folders(workspace.folders)
+    end
 end
 
 """
@@ -56,12 +63,12 @@ function diff_snapshots(old::Dict{String,Float64}, new::Dict{String,Float64})
 end
 
 """
-Apply on-disc changes to the workspace. Returns the number of files applied.
+Apply on-disc changes to a workspace. Returns the number of files applied.
 """
-function apply_file_changes!(state::AppState, created, modified, deleted)
+function apply_file_changes!(state::AppState, workspace::Workspace, created, modified, deleted)
     applied = 0
-    with_workspace_lock(state) do
-        jw = state.workspace
+    with_workspace_lock(workspace) do
+        jw = workspace.workspace
         jw === nothing && return
         for path in Iterators.flatten((created, modified))
             uri = JuliaWorkspaces.filepath2uri(path)
@@ -99,10 +106,10 @@ function notify_workspace_changed(state::AppState)
 end
 
 """
-Apply a batch of changes and tell subscribers about it.
+Apply a batch of changes and notify subscribers.
 """
-function handle_file_changes!(state::AppState, created, modified, deleted)
-    applied = apply_file_changes!(state, created, modified, deleted)
+function handle_file_changes!(state::AppState, workspace::Workspace, created, modified, deleted)
+    applied = apply_file_changes!(state, workspace, created, modified, deleted)
     applied == 0 && return 0
 
     mcp_debug(state, "watcher",
@@ -111,23 +118,36 @@ function handle_file_changes!(state::AppState, created, modified, deleted)
     return applied
 end
 
-function watch_loop(state::AppState, stop::Ref{Bool}, interval::Float64, debounce::Float64)
+function watch_loop(
+    state::AppState,
+    workspace::Workspace,
+    stop::Ref{Bool},
+    interval::Float64,
+    debounce::Float64,
+)
     while !stop[]
         sleep(interval)
         stop[] && break
         try
-            current = scan_folders(state.folders)
-            created, modified, deleted = diff_snapshots(state.watcher_snapshot, current)
+            old_snapshot = with_workspace_lock(workspace) do
+                copy(workspace.watcher_snapshot)
+            end
+            current = scan_folders(workspace)
+            created, modified, deleted = diff_snapshots(old_snapshot, current)
             (isempty(created) && isempty(modified) && isempty(deleted)) && continue
 
-            # Let a burst of writes settle, then re-scan so the batch is coherent.
             sleep(debounce)
             stop[] && break
-            current = scan_folders(state.folders)
-            created, modified, deleted = diff_snapshots(state.watcher_snapshot, current)
-            state.watcher_snapshot = current
+            current = scan_folders(workspace)
+            old_snapshot = with_workspace_lock(workspace) do
+                copy(workspace.watcher_snapshot)
+            end
+            created, modified, deleted = diff_snapshots(old_snapshot, current)
+            with_workspace_lock(workspace) do
+                workspace.watcher_snapshot = current
+            end
 
-            handle_file_changes!(state, created, modified, deleted)
+            handle_file_changes!(state, workspace, created, modified, deleted)
         catch err
             mcp_debug(state, "watcher", "Watch cycle failed: $(sprint(showerror, err))")
         end
@@ -135,24 +155,48 @@ function watch_loop(state::AppState, stop::Ref{Bool}, interval::Float64, debounc
 end
 
 """
-Start watching `state.folders`. Any previously running watcher is stopped first.
+Start one watcher for a workspace.
 """
-function start_watcher!(state::AppState; interval=WATCH_INTERVAL_DEFAULT, debounce=WATCH_DEBOUNCE_DEFAULT)
-    stop_watcher!(state)
-    isempty(state.folders) && return nothing
+# ponytail: N workspaces mean N pollers. Upgrade to one shared snapshot per folder when polling cost matters.
+function start_watcher!(
+    state::AppState,
+    workspace::Workspace;
+    interval=WATCH_INTERVAL_DEFAULT,
+    debounce=WATCH_DEBOUNCE_DEFAULT,
+)
+    stop_watcher!(workspace)
+    folders = with_workspace_lock(workspace) do
+        copy(workspace.folders)
+    end
+    isempty(folders) && return nothing
 
-    state.watcher_snapshot = scan_folders(state.folders)
+    snapshot = scan_folders(workspace)
     stop = Ref(false)
-    state.watcher_stop = stop
-    state.watcher_task = @async watch_loop(state, stop, Float64(interval), Float64(debounce))
-    mcp_debug(state, "watcher", "Watching $(length(state.folders)) folder(s) every $(interval)s")
-    return state.watcher_task
+    with_workspace_lock(workspace) do
+        workspace.watcher_snapshot = snapshot
+        workspace.watcher_stop = stop
+    end
+    task = @async watch_loop(state, workspace, stop, Float64(interval), Float64(debounce))
+    with_workspace_lock(workspace) do
+        workspace.watcher_task = task
+    end
+    mcp_debug(state, "watcher", "Watching $(length(folders)) folder(s) every $(interval)s")
+    return task
+end
+
+function stop_watcher!(workspace::Workspace)
+    with_workspace_lock(workspace) do
+        workspace.watcher_stop === nothing || (workspace.watcher_stop[] = true)
+        workspace.watcher_stop = nothing
+        workspace.watcher_task = nothing
+    end
+    return nothing
 end
 
 function stop_watcher!(state::AppState)
-    state.watcher_stop === nothing && return
-    state.watcher_stop[] = true
-    state.watcher_stop = nothing
-    state.watcher_task = nothing
-    return
+    workspaces = lock(state.lock) do
+        collect(values(state.workspaces))
+    end
+    foreach(stop_watcher!, workspaces)
+    return nothing
 end

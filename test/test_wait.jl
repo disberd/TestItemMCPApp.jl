@@ -122,11 +122,10 @@ end
 
 @testitem "rerun_failed forwards max_wait_seconds" setup=[MCPTestHelpers] tags=[:e2e] begin
     using .MCPTestHelpers
-    using JuliaMCP: JuliaWorkspaces
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         first_result = JuliaMCP.tool_run_testitems(state, Dict{String,Any}("max_wait_seconds" => 123))
         @test !MCPTestHelpers.is_error(first_result)
@@ -138,7 +137,7 @@ end
         @test rerun_id != first_id
 
         rerun = lock(state.lock) do
-            state.runs[rerun_id]
+            workspace.runs[rerun_id]
         end
         @test rerun.profile_params["max_wait_seconds"] == 123
     end

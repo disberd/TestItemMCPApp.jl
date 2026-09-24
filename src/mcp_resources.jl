@@ -52,33 +52,39 @@ end
 
 function dynamic_resources(state::AppState)
     res = Dict{String,Any}[]
-    lock(state.lock) do
-        for (id, run) in state.runs
+    workspaces, sessions = lock(state.lock) do
+        (collect(values(state.workspaces)), collect(state.sessions))
+    end
+    for workspace in workspaces
+        runs = lock(state.lock) do
+            [(id, run.status) for (id, run) in workspace.runs]
+        end
+        for (id, status) in runs
             push!(res, Dict{String,Any}(
                 "uri" => "testrun://$id/summary",
-                "name" => "Run $id summary ($(run.status))",
+                "name" => "Run $id summary ($status)",
                 "mimeType" => "application/json",
             ))
         end
-        for p in list_test_processes(state)
+        for p in list_test_processes(workspace)
             push!(res, Dict{String,Any}(
                 "uri" => "testprocess://$(p.id)/output",
                 "name" => "Process $(p.id) output ($(p.package_name), $(p.status))",
                 "mimeType" => "text/plain",
             ))
         end
-        for (id, rec) in state.sessions
-            push!(res, Dict{String,Any}(
-                "uri" => "session://$id/info",
-                "name" => "Session $id ($(rec.status))",
-                "mimeType" => "application/json",
-            ))
-            push!(res, Dict{String,Any}(
-                "uri" => "session://$id/output",
-                "name" => "Session $id output",
-                "mimeType" => "text/plain",
-            ))
-        end
+    end
+    for (id, rec) in sessions
+        push!(res, Dict{String,Any}(
+            "uri" => "session://$id/info",
+            "name" => "Session $id ($(rec.status))",
+            "mimeType" => "application/json",
+        ))
+        push!(res, Dict{String,Any}(
+            "uri" => "session://$id/output",
+            "name" => "Session $id output",
+            "mimeType" => "text/plain",
+        ))
     end
     push!(res, Dict{String,Any}(
         "uri" => "workspace://testitems",
@@ -115,47 +121,59 @@ function handle_resources_read(state::AppState, params::Dict)
     return Dict{String,Any}("contents" => contents)
 end
 
+function resource_workspace(state::AppState, uri::String)
+    try
+        return resolve_workspace(state, Dict{String,Any}())
+    catch err
+        err isa WorkspaceResolutionError || rethrow()
+        throw(ResourceNotFound(uri, err.message))
+    end
+end
+
+function resource_run(state::AppState, uri::String, run_id::AbstractString)
+    run_key = String(run_id)
+    workspace = find_workspace_for_run(state, run_key)
+    workspace === nothing && throw(ResourceNotFound(uri, "Test run not found: $run_id"))
+    run = lock(state.lock) do
+        get(workspace.runs, run_key, nothing)
+    end
+    run === nothing && throw(ResourceNotFound(uri, "Test run not found: $run_id"))
+    return workspace, run
+end
+
 function read_resource(state::AppState, uri::String)
-    # workspace://testitems
     if uri == "workspace://testitems"
-        items = collect_testitems_list(state)
+        workspace = resource_workspace(state, uri)
+        items = collect_testitems_list(state; workspace=workspace)
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(items))]
     end
 
-    # workspace://detection-errors
     if uri == "workspace://detection-errors"
-        errors = collect_detection_errors(state)
+        workspace = resource_workspace(state, uri)
+        errors = collect_detection_errors(state; workspace=workspace)
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(errors))]
     end
 
-    # workspace://diagnostics
     if uri == "workspace://diagnostics"
-        diagnostics = collect_diagnostics(state)
+        workspace = resource_workspace(state, uri)
+        diagnostics = collect_diagnostics(state; workspace=workspace)
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(diagnostics))]
     end
 
-    # testrun://{id}/summary
     m = match(r"^testrun://([^/]+)/summary$", uri)
     if m !== nothing
-        run_id = m[1]
-        run = lock(state.lock) do
-            get(state.runs, run_id, nothing)
-        end
-        run === nothing && throw(ResourceNotFound(uri, "Test run not found: $run_id"))
+        run_id = String(m[1])
+        _, run = resource_run(state, uri, run_id)
         summary = lock(state.lock) do
             run_summary(run)
         end
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(summary))]
     end
 
-    # testrun://{id}/failures
     m = match(r"^testrun://([^/]+)/failures$", uri)
     if m !== nothing
-        run_id = m[1]
-        run = lock(state.lock) do
-            get(state.runs, run_id, nothing)
-        end
-        run === nothing && throw(ResourceNotFound(uri, "Test run not found: $run_id"))
+        run_id = String(m[1])
+        _, run = resource_run(state, uri, run_id)
         failures = lock(state.lock) do
             [
                 Dict{String,Any}(
@@ -171,40 +189,38 @@ function read_resource(state::AppState, uri::String)
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(failures))]
     end
 
-    # testrun://{id}/items/{item_id}/output
     m = match(r"^testrun://([^/]+)/items/([^/]+)/output$", uri)
     if m !== nothing
-        run_id, item_id = m[1], m[2]
+        run_id, item_id = String(m[1]), String(m[2])
+        _, run = resource_run(state, uri, run_id)
         output = lock(state.lock) do
-            run = get(state.runs, run_id, nothing)
-            run === nothing && return nothing
             item = get(run.items, item_id, nothing)
-            item === nothing && return nothing
-            join(item.output, "")
+            item === nothing ? nothing : join(item.output, "")
         end
         output === nothing && throw(ResourceNotFound(uri, "Test item not found: $item_id in run $run_id"))
         return [Dict{String,Any}("uri" => uri, "mimeType" => "text/plain", "text" => output)]
     end
 
-    # testrun://{id}/coverage
     m = match(r"^testrun://([^/]+)/coverage$", uri)
     if m !== nothing
-        run_id = m[1]
+        run_id = String(m[1])
+        _, run = resource_run(state, uri, run_id)
         coverage = lock(state.lock) do
-            run = get(state.runs, run_id, nothing)
-            run === nothing && return nothing
             run.coverage
         end
         coverage === nothing && throw(ResourceNotFound(uri, "No coverage data for run: $run_id"))
         return [Dict{String,Any}("uri" => uri, "mimeType" => "application/json", "text" => JSON.json(coverage))]
     end
 
-    # testprocess://{id}/output
     m = match(r"^testprocess://([^/]+)/output$", uri)
     if m !== nothing
-        process_id = m[1]
-        output = any(p -> p.id == process_id, list_test_processes(state)) ?
-            TIR.process_output(state.session, process_id) : nothing
+        process_id = String(m[1])
+        workspace = find_workspace_for_process(state, process_id)
+        workspace === nothing && throw(ResourceNotFound(uri, "Test process not found: $process_id"))
+        output = with_workspace_lock(workspace) do
+            session = workspace.session
+            session === nothing ? nothing : TIR.process_output(session, process_id)
+        end
         output === nothing && throw(ResourceNotFound(uri, "Test process not found: $process_id"))
         return [Dict{String,Any}("uri" => uri, "mimeType" => "text/plain", "text" => output)]
     end
@@ -212,7 +228,7 @@ function read_resource(state::AppState, uri::String)
     # session://{id}/output
     m = match(r"^session://([^/]+)/output$", uri)
     if m !== nothing
-        session_id = m[1]
+        session_id = String(m[1])
         output = lock(state.lock) do
             rec = get(state.sessions, session_id, nothing)
             rec === nothing ? nothing : join(rec.output, "")
@@ -224,7 +240,7 @@ function read_resource(state::AppState, uri::String)
     # session://{id}/info
     m = match(r"^session://([^/]+)/info$", uri)
     if m !== nothing
-        session_id = m[1]
+        session_id = String(m[1])
         info = lock(state.lock) do
             rec = get(state.sessions, session_id, nothing)
             rec === nothing ? nothing : session_dict(rec)

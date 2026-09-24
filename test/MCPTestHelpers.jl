@@ -66,6 +66,33 @@ function with_app_state(f)
     end
 end
 
+"""
+Add a workspace to `state` and build its JuliaWorkspaces index.
+"""
+function add_workspace!(state, folders=String[]; kwargs...)
+    normalized = JuliaMCP.normalize_workspace_folders(folders)
+    workspace = JuliaMCP.Workspace(copy(normalized))
+    if !isempty(normalized)
+        JuliaMCP.with_workspace_lock(workspace) do
+            workspace.workspace = JuliaMCP.JuliaWorkspaces.workspace_from_folders(normalized; kwargs...)
+        end
+    end
+    id = JuliaMCP.workspace_id(normalized)
+    lock(state.lock) do
+        state.workspaces[id] = workspace
+    end
+    return workspace
+end
+
+function workspace_id_from_result(result)
+    get(result, "isError", false) === true && error("Workspace setup failed")
+    text = join([content["text"] for content in result["content"] if content["type"] == "text"], "\n")
+    id_match = match(r"workspace_id=([0-9a-f]+)", text)
+    id_match === nothing && error("Workspace setup did not return a workspace_id")
+    return id_match[1]
+end
+
+
 # --- Full server over a transport --------------------------------------------
 
 mutable struct MCPClient

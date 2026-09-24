@@ -52,12 +52,13 @@ end
     using Dates
 
     MCPTestHelpers.with_app_state() do state
+        workspace = MCPTestHelpers.add_workspace!(state)
         run = TestRunRecord("run-1", :completed, Dict{String,Any}(), Dict{String,TestItemResult}(),
             nothing, Dates.now(), nothing)
         run.items["item-1"] = TestItemResult("item-1", "passing", "file:///a.jl", :passed, 0.5, Any[], ["hello"])
         run.items["item-2"] = TestItemResult("item-2", "failing", "file:///a.jl", :failed, 0.2,
             Any[Dict("message" => "nope")], String[])
-        state.runs["run-1"] = run
+        workspace.runs["run-1"] = run
 
         summary = MCPTestHelpers.JSON.parse(only(read_resource(state, "testrun://run-1/summary"))["text"])
         @test summary isa Dict
@@ -82,7 +83,8 @@ end
     using Dates
 
     MCPTestHelpers.with_app_state() do state
-        state.runs["run-9"] = TestRunRecord("run-9", :running, Dict{String,Any}(),
+        workspace = MCPTestHelpers.add_workspace!(state)
+        workspace.runs["run-9"] = TestRunRecord("run-9", :running, Dict{String,Any}(),
             Dict{String,TestItemResult}(), nothing, Dates.now(), nothing)
 
         uris = [r["uri"] for r in dynamic_resources(state)]

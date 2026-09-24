@@ -1,16 +1,15 @@
 # bridge.jl — Test item discovery and selection through TestItemRuns
 
 """
-    discover(state; filter=nothing) -> TestItemRuns.Discovery
+    discover(state; workspace=nothing, filter=nothing) -> TestItemRuns.Discovery
 
-Discover the workspace's test items under the workspace lock (the Salsa runtime behind
-`state.workspace` is not safe for concurrent access, and the file watcher mutates it) and
-apply the tool-argument `filter` built by `build_filter`.
+Discover test items under the workspace lock and apply the optional filter.
 """
-function discover(state::AppState; filter=nothing)
-    jw = state.workspace
+function discover(state::AppState; workspace=nothing, filter=nothing)
+    workspace = workspace === nothing ? resolve_workspace(state, Dict{String,Any}()) : workspace
+    jw = workspace.workspace
     jw === nothing && error("Workspace not configured. Call julia_set_workspace_folders first.")
-    d = with_workspace_lock(state) do
+    d = with_workspace_lock(workspace) do
         TIR.discover_testitems(jw)
     end
     filter === nothing && return d
@@ -91,9 +90,14 @@ function definition_error_dict(e::TIR.DefinitionError)
     )
 end
 
-function collect_detection_errors(state::AppState)
-    state.workspace === nothing && return Any[]
-    return Any[definition_error_dict(e) for e in discover(state).definition_errors]
+function collect_detection_errors(state::AppState; workspace=nothing)
+    no_workspaces = lock(state.lock) do
+        isempty(state.workspaces)
+    end
+    workspace === nothing && no_workspaces && return Any[]
+    workspace = workspace === nothing ? resolve_workspace(state, Dict{String,Any}()) : workspace
+    discovery = discover(state; workspace=workspace)
+    return Any[definition_error_dict(e) for e in discovery.definition_errors]
 end
 
 function testitem_list_dict(item::TIR.TestItem)
@@ -109,11 +113,14 @@ function testitem_list_dict(item::TIR.TestItem)
     )
 end
 
-function collect_testitems_list(state::AppState; filter=nothing)
-    state.workspace === nothing && return Any[]
-    return Any[testitem_list_dict(item) for item in discover(state; filter=filter)]
+function collect_testitems_list(state::AppState; workspace=nothing, filter=nothing)
+    no_workspaces = lock(state.lock) do
+        isempty(state.workspaces)
+    end
+    workspace === nothing && no_workspaces && return Any[]
+    workspace = workspace === nothing ? resolve_workspace(state, Dict{String,Any}()) : workspace
+    return Any[testitem_list_dict(item) for item in discover(state; workspace=workspace, filter=filter)]
 end
-
 """
     shim_env_overrides()
 

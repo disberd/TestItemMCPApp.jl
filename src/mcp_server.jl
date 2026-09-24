@@ -17,8 +17,11 @@ function run_server(input::IO, output::IO)
             @error "Server error" exception = (e, catch_backtrace())
         end
     finally
-        stop_watcher!(state)
-        shutdown_controller!(state)
+        workspaces = lock(state.lock) do
+            collect(values(state.workspaces))
+        end
+        foreach(stop_watcher!, workspaces)
+        foreach(workspace -> shutdown_controller!(state, workspace), workspaces)
         shutdown_sessions!(state)
         try
             close(endpoint)

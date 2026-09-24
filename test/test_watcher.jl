@@ -15,7 +15,7 @@ end
 
 @testitem "scan_folders finds relevant files and skips noise" setup=[MCPTestHelpers] begin
     using .MCPTestHelpers
-    using JuliaMCP: scan_folders
+    using JuliaMCP: Workspace, scan_folders
 
     dir = mktempdir()
     write(joinpath(dir, "a.jl"), "x = 1")
@@ -28,14 +28,14 @@ end
     mkpath(joinpath(dir, "node_modules"))
     write(joinpath(dir, "node_modules", "vendor.jl"), "nope")
 
-    snapshot = scan_folders([dir])
+    snapshot = scan_folders(Workspace([dir]))
     names = sort(basename.(collect(keys(snapshot))))
 
     @test names == ["Project.toml", "a.jl", "b.jl"]
     @test all(v -> v isa Float64, values(snapshot))
 
     # Non-existent folders are ignored rather than throwing.
-    @test isempty(scan_folders([joinpath(dir, "does-not-exist")]))
+    @test isempty(scan_folders(Workspace([joinpath(dir, "does-not-exist")])))
 end
 
 @testitem "diff_snapshots" begin
@@ -162,36 +162,37 @@ end
     second_pkg = MCPTestHelpers.copy_testdata("BasicPkg")
 
     MCPTestHelpers.with_app_state() do state
-        state.folders = [first_pkg]
-        JuliaMCP.start_watcher!(state; interval=0.05)
-        first_task = state.watcher_task
+        workspace = MCPTestHelpers.add_workspace!(state, [first_pkg])
+        JuliaMCP.start_watcher!(state, workspace; interval=0.05)
+        first_task = workspace.watcher_task
         @test first_task !== nothing
 
-        state.folders = [second_pkg]
-        JuliaMCP.start_watcher!(state; interval=0.05)
-        @test state.watcher_task !== first_task
+        JuliaMCP.with_workspace_lock(workspace) do
+            workspace.folders = [second_pkg]
+        end
+        JuliaMCP.start_watcher!(state, workspace; interval=0.05)
+        @test workspace.watcher_task !== first_task
         @test MCPTestHelpers.timed_wait(() -> istaskdone(first_task), 10.0)
 
-        second_task = state.watcher_task
-        JuliaMCP.stop_watcher!(state)
-        @test state.watcher_task === nothing
+        second_task = workspace.watcher_task
+        JuliaMCP.stop_watcher!(workspace)
+        @test workspace.watcher_task === nothing
         @test MCPTestHelpers.timed_wait(() -> istaskdone(second_task), 10.0)
     end
 end
 
-@testitem "apply_file_changes! tolerates unreadable paths" setup=[MCPTestHelpers] begin
+@testitem "apply_file_changes ignores missing paths" setup=[MCPTestHelpers] begin
     using .MCPTestHelpers
-    using JuliaMCP: JuliaWorkspaces, apply_file_changes!
+    using JuliaMCP: apply_file_changes!
 
     pkg = MCPTestHelpers.copy_testdata("BasicPkg")
 
     MCPTestHelpers.with_app_state() do state
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
-        state.folders = [pkg]
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         # A file that never existed must not take the watcher down.
-        @test apply_file_changes!(state, [joinpath(pkg, "ghost.jl")], String[], String[]) == 0
+        @test apply_file_changes!(state, workspace, [joinpath(pkg, "ghost.jl")], String[], String[]) == 0
         # Removing a file the workspace never knew about is a no-op.
-        @test apply_file_changes!(state, String[], String[], [joinpath(pkg, "ghost.jl")]) == 0
+        @test apply_file_changes!(state, workspace, String[], String[], [joinpath(pkg, "ghost.jl")]) == 0
     end
 end

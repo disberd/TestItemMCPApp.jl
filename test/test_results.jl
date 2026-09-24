@@ -111,7 +111,8 @@ end
             "b" => TestItemResult("b", "b", "file:///a.jl", :passed, 0.1, Any[], ["short"]),
         )
         run = TestRunRecord("run-1", :completed, Dict{String,Any}(), items, nothing, Dates.now(), nothing)
-        state.runs["run-1"] = run
+        workspace = MCPTestHelpers.add_workspace!(state)
+        workspace.runs["run-1"] = run
 
         details = MCPTestHelpers.result_json(handle_tool_call(state, "julia_get_testitem_detail",
             Dict{String,Any}("testrun_id" => "run-1", "testitem_ids" => ["a", "b", "missing"])))

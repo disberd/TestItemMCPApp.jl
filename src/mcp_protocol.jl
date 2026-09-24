@@ -34,11 +34,10 @@ function handle_initialize(state::AppState, params::Dict)
             There are two independent halves.
 
             The workspace half analyses and tests a checkout. Call
-            `julia_set_workspace_folders` first — `julia_get_diagnostics`,
-            `julia_format_file`, `julia_list_testitems` and `julia_run_testitems` all fail
-            until you do. The workspace then tracks the file system itself, so there is
-            nothing to call after editing a file.
-
+            `julia_set_workspace_folders` first. It returns a `workspace_id`; pass that id to
+            workspace tools when the server has more than one workspace. Without an id,
+            workspace tools work only when exactly one workspace exists. Each workspace
+            tracks its file system itself, so there is nothing to call after editing a file.
             For tests, `julia_list_testitems` shows what exists and
             `julia_run_testitems` runs it. Prefer this over `Pkg.test()` or
             `julia --project -e`: worker processes stay alive between runs and hot-reload

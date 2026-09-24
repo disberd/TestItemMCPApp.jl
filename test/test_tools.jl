@@ -18,6 +18,24 @@
             @test haskey(prop, "type")
         end
     end
+
+    for name in (
+        "julia_get_diagnostics",
+        "julia_format_file",
+        "julia_list_testitems",
+        "julia_run_testitems",
+        "julia_rerun_failed",
+        "julia_cancel_testrun",
+        "julia_get_testrun_results",
+        "julia_get_testitem_detail",
+        "julia_list_testruns",
+        "julia_list_test_processes",
+        "julia_terminate_test_process",
+        "julia_get_coverage_results",
+    )
+        definition = only(filter(d -> d["name"] == name, defs))
+        @test definition["inputSchema"]["properties"]["workspace_id"]["type"] == "string"
+    end
 end
 
 @testitem "tool descriptions identify themselves as Julia" begin
@@ -134,7 +152,8 @@ end
             nothing, Dates.now(), nothing)
         run.items["item-1"] = TestItemResult("item-1", "passing", "file:///a.jl", :passed, 0.5,
             Any[], ["some output"])
-        state.runs["run-1"] = run
+        workspace = MCPTestHelpers.add_workspace!(state)
+        workspace.runs["run-1"] = run
 
         result = handle_tool_call(state, "julia_get_testitem_detail",
             Dict{String,Any}("testrun_id" => "run-1", "testitem_id" => "item-1"))
@@ -225,6 +244,9 @@ end
     using .MCPTestHelpers
 
     MCPTestHelpers.with_mcp_server() do client
+        pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
+        MCPTestHelpers.call_tool(client, "julia_set_workspace_folders",
+            Dict{String,Any}("folders" => [pkg], "watch" => false))
         @test MCPTestHelpers.result_json(MCPTestHelpers.call_tool(client, "julia_list_testruns")) == []
         @test MCPTestHelpers.result_json(MCPTestHelpers.call_tool(client, "julia_list_test_processes")) == []
     end

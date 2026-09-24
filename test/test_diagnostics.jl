@@ -67,8 +67,8 @@ end
             catch e
                 e
             end
-            @test err isa ErrorException
-            @test occursin("Workspace not configured", err.msg)
+            @test err isa JuliaMCP.WorkspaceResolutionError
+            @test occursin("Workspace not configured", err.message)
 
             @test run_options(Dict{String,Any}("max_workers" => T(3))).max_workers == 3
         end
@@ -144,11 +144,15 @@ end
     # feature: its environment is not indexed yet when the request arrives.
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "LintPkg")
-        jw = JuliaWorkspaces.workspace_from_folders([pkg]; dynamic=JuliaWorkspaces.DynamicIndexingOnly)
-        state.workspace = jw
+        workspace = MCPTestHelpers.add_workspace!(
+            state,
+            [pkg];
+            dynamic=JuliaWorkspaces.DynamicIndexingOnly,
+        )
+        jw = workspace.workspace
         uri = JuliaWorkspaces.filepath2uri(joinpath(pkg, "src", "badsyntax.jl"))
 
-        report = collect_diagnostics(state; uri, wait_for_ready=true)
+        report = collect_diagnostics(state; workspace=workspace, uri=uri, wait_for_ready=true)
         @test JuliaWorkspaces.is_ready(jw)
         @test report["total"] >= 1
     end
@@ -225,9 +229,10 @@ end
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "LintPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
-        report = collect_diagnostics(state)
+        report = collect_diagnostics(state; workspace=workspace)
+
         for file in report["files"]
             path = JuliaWorkspaces.uri2filepath(JuliaWorkspaces.URIs2.URI(file["uri"]))
             lines = collect(eachline(path))

@@ -4,7 +4,7 @@
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         d = JuliaMCP.discover(state)
         items = d.testitems
@@ -38,7 +38,7 @@ end
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         items = JuliaMCP.discover(state).testitems
         passing = only(filter(i -> i.name == "passing", items))
@@ -60,7 +60,7 @@ end
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         d = JuliaMCP.discover(state)
         items, setups = d.testitems, d.setups
@@ -85,7 +85,7 @@ end
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         items = JuliaMCP.discover(state).testitems
 
@@ -128,8 +128,7 @@ end
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        jw = JuliaWorkspaces.workspace_from_folders([pkg])
-        state.workspace = jw
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         byname = Dict(i.name => i for i in JuliaMCP.discover(state).testitems)
 
@@ -206,7 +205,7 @@ end
 
     MCPTestHelpers.with_app_state() do state
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         items = collect_testitems_list(state)
         @test length(items) == 7
@@ -233,7 +232,7 @@ end
         @test collect_detection_errors(state) == Any[]
 
         pkg = joinpath(MCPTestHelpers.TESTDATA_DIR, "BasicPkg")
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
         @test collect_detection_errors(state) == Any[]
     end
 end
@@ -250,7 +249,7 @@ end
             @test true
         end
         """)
-        state.workspace = JuliaWorkspaces.workspace_from_folders([pkg])
+        workspace = MCPTestHelpers.add_workspace!(state, [pkg])
 
         errors = collect_detection_errors(state)
         err = only(errors)
@@ -266,6 +265,6 @@ end
     using .MCPTestHelpers
 
     MCPTestHelpers.with_app_state() do state
-        @test_throws ErrorException JuliaMCP.discover(state)
+        @test_throws JuliaMCP.WorkspaceResolutionError JuliaMCP.discover(state)
     end
 end

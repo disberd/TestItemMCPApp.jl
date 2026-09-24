@@ -32,87 +32,99 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
     invalid = validate_tool_arguments(tool_name, arguments)
     invalid === nothing || return invalid
 
-    if tool_name == "julia_set_workspace_folders"
-        return tool_set_workspace_folders(state, arguments)
-    elseif tool_name == "julia_update_file"
-        return tool_update_file(state, arguments)
-    elseif tool_name == "julia_get_diagnostics"
-        return tool_get_diagnostics(state, arguments)
-    elseif tool_name == "julia_format_file"
-        return tool_format_file(state, arguments)
-    elseif tool_name == "julia_list_testitems"
-        return tool_list_testitems(state, arguments)
-    elseif tool_name == "julia_run_testitems"
-        return tool_run_testitems(state, arguments; progress_token=progress_token)
-    elseif tool_name == "julia_rerun_failed"
-        return tool_rerun_failed(state, arguments; progress_token=progress_token)
-    elseif tool_name == "julia_cancel_testrun"
-        return tool_cancel_testrun(state, arguments)
-    elseif tool_name == "julia_get_testrun_results"
-        return tool_get_testrun_results(state, arguments)
-    elseif tool_name == "julia_get_testitem_detail"
-        return tool_get_testitem_detail(state, arguments)
-    elseif tool_name == "julia_list_testruns"
-        return tool_list_testruns(state, arguments)
-    elseif tool_name == "julia_list_test_processes"
-        return tool_list_test_processes(state, arguments)
-    elseif tool_name == "julia_terminate_test_process"
-        return tool_terminate_test_process(state, arguments)
-    elseif tool_name == "julia_get_coverage_results"
-        return tool_get_coverage_results(state, arguments)
-    elseif tool_name == "julia_create_session"
-        return tool_create_session(state, arguments)
-    elseif tool_name == "julia_eval_code"
-        return tool_eval_code(state, arguments)
-    elseif tool_name == "julia_interrupt_session"
-        return tool_interrupt_session(state, arguments)
-    elseif tool_name == "julia_kill_session"
-        return tool_kill_session(state, arguments)
-    elseif tool_name == "julia_list_sessions"
-        return tool_list_sessions(state, arguments)
-    elseif tool_name == "julia_profile_code"
-        return tool_profile_code(state, arguments)
-    elseif tool_name == "julia_get_session_variables"
-        return tool_get_session_variables(state, arguments)
-    else
-        error("Unknown tool: $tool_name")
+    try
+        if tool_name == "julia_set_workspace_folders"
+            return tool_set_workspace_folders(state, arguments)
+        elseif tool_name == "julia_update_file"
+            return tool_update_file(state, arguments)
+        elseif tool_name == "julia_get_diagnostics"
+            return tool_get_diagnostics(state, arguments)
+        elseif tool_name == "julia_format_file"
+            return tool_format_file(state, arguments)
+        elseif tool_name == "julia_list_testitems"
+            return tool_list_testitems(state, arguments)
+        elseif tool_name == "julia_run_testitems"
+            return tool_run_testitems(state, arguments; progress_token=progress_token)
+        elseif tool_name == "julia_rerun_failed"
+            return tool_rerun_failed(state, arguments; progress_token=progress_token)
+        elseif tool_name == "julia_cancel_testrun"
+            return tool_cancel_testrun(state, arguments)
+        elseif tool_name == "julia_get_testrun_results"
+            return tool_get_testrun_results(state, arguments)
+        elseif tool_name == "julia_get_testitem_detail"
+            return tool_get_testitem_detail(state, arguments)
+        elseif tool_name == "julia_list_testruns"
+            return tool_list_testruns(state, arguments)
+        elseif tool_name == "julia_list_test_processes"
+            return tool_list_test_processes(state, arguments)
+        elseif tool_name == "julia_terminate_test_process"
+            return tool_terminate_test_process(state, arguments)
+        elseif tool_name == "julia_get_coverage_results"
+            return tool_get_coverage_results(state, arguments)
+        elseif tool_name == "julia_create_session"
+            return tool_create_session(state, arguments)
+        elseif tool_name == "julia_eval_code"
+            return tool_eval_code(state, arguments)
+        elseif tool_name == "julia_interrupt_session"
+            return tool_interrupt_session(state, arguments)
+        elseif tool_name == "julia_kill_session"
+            return tool_kill_session(state, arguments)
+        elseif tool_name == "julia_list_sessions"
+            return tool_list_sessions(state, arguments)
+        elseif tool_name == "julia_profile_code"
+            return tool_profile_code(state, arguments)
+        elseif tool_name == "julia_get_session_variables"
+            return tool_get_session_variables(state, arguments)
+        else
+            error("Unknown tool: $tool_name")
+        end
+    catch err
+        err isa WorkspaceResolutionError || rethrow()
+        return tool_result_error(err.message)
     end
 end
 
 # --- set_workspace_folders ---
 
 function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
-    folders = convert(Vector{String}, args["folders"])
+    folders = normalize_workspace_folders(args["folders"])
+    id = workspace_id(folders)
     mcp_info(state, "tools", "Setting workspace folders: $folders")
 
-    with_workspace_lock(state) do
-        state.workspace = JuliaWorkspaces.workspace_from_folders(folders; scope=WORKSPACE_SCOPE)
+    workspace = lock(state.lock) do
+        get!(state.workspaces, id) do
+            Workspace(copy(folders))
+        end
     end
-    state.folders = folders
+    stop_watcher!(workspace)
+    with_workspace_lock(workspace) do
+        workspace.folders = copy(folders)
+        workspace.workspace = JuliaWorkspaces.workspace_from_folders(folders; scope=WORKSPACE_SCOPE)
+    end
+    lock(state.lock) do
+        workspace.last_used_at = Dates.now()
+    end
 
-    # Initialize controller on first workspace setup
-    init_controller!(state)
-
-    # `watch` is not advertised in the tool schema; watching is the only sane default for a
-    # client, but tests and embedders still need to opt out.
+    init_controller!(state, workspace)
     if something(get(args, "watch", nothing), true)
         start_watcher!(
-            state;
+            state,
+            workspace;
             interval = something(get(args, "watch_interval", nothing), WATCH_INTERVAL_DEFAULT),
         )
     else
-        stop_watcher!(state)
+        stop_watcher!(workspace)
     end
 
-    items = collect_testitems_list(state)
-    errors = collect_detection_errors(state)
+    items = collect_testitems_list(state; workspace=workspace)
+    errors = collect_detection_errors(state; workspace=workspace)
 
     notify_resource_list_changed(state)
     notify_resource_updated(state, "workspace://testitems")
     notify_resource_updated(state, "workspace://detection-errors")
     notify_resource_updated(state, "workspace://diagnostics")
 
-    text = "Workspace configured with $(length(folders)) folder(s). " *
+    text = "Workspace configured with $(length(folders)) folder(s), workspace_id=$id. " *
            "Detected $(length(items)) test item(s)"
     if !isempty(errors)
         text *= " and $(length(errors)) detection error(s)"
@@ -125,19 +137,18 @@ end
 # --- update_file ---
 
 function tool_update_file(state::AppState, args::Dict{String,Any})
-    # Unadvertised, so `validate_tool_arguments` has no schema to check `path` against.
     haskey(args, "path") && args["path"] !== nothing ||
         return tool_result_error("Missing required argument(s) for julia_update_file: path")
 
     path = args["path"]::String
-    jw = state.workspace
+    workspace = resolve_workspace(state, args)
+    jw = workspace.workspace
     jw === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
 
-    with_workspace_lock(state) do
+    with_workspace_lock(workspace) do
         JuliaWorkspaces.update_file_from_disc!(jw, path)
+        haskey(workspace.watcher_snapshot, path) && (workspace.watcher_snapshot[path] = mtime(path))
     end
-    # Keep the watcher from re-reporting a change we just applied.
-    haskey(state.watcher_snapshot, path) && (state.watcher_snapshot[path] = mtime(path))
 
     notify_resource_updated(state, "workspace://testitems")
     notify_resource_updated(state, "workspace://detection-errors")
@@ -149,21 +160,26 @@ end
 # --- get_diagnostics ---
 
 function tool_get_diagnostics(state::AppState, args::Dict{String,Any})
-    state.workspace === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
+    workspace = resolve_workspace(state, args)
+    jw = workspace.workspace
+    jw === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
 
-    uri = haskey(args, "path") && args["path"] !== nothing ? resolve_uri(args["path"]::String) : nothing
-    if uri !== nothing && !with_workspace_lock(() -> JuliaWorkspaces.has_file(state.workspace, uri), state)
+    uri = with_workspace_lock(workspace) do
+        haskey(args, "path") && args["path"] !== nothing ? resolve_uri(args["path"]::String) : nothing
+    end
+    if uri !== nothing && !with_workspace_lock(() -> JuliaWorkspaces.has_file(jw, uri), workspace)
         return tool_result_error("File is not part of the workspace: $(args["path"])")
     end
 
     result = try
         collect_diagnostics(
             state;
-            uri = uri,
-            severity = get(args, "severity", nothing),
-            source = get(args, "source", nothing),
-            max_results = something(get(args, "max_results", nothing), DIAGNOSTIC_LIMIT_DEFAULT),
-            wait_for_ready = something(get(args, "wait_for_ready", nothing), false),
+            workspace=workspace,
+            uri=uri,
+            severity=get(args, "severity", nothing),
+            source=get(args, "source", nothing),
+            max_results=something(get(args, "max_results", nothing), DIAGNOSTIC_LIMIT_DEFAULT),
+            wait_for_ready=something(get(args, "wait_for_ready", nothing), false),
         )
     catch err
         return tool_result_error("Failed to collect diagnostics: $(sprint(showerror, err))")
@@ -171,16 +187,18 @@ function tool_get_diagnostics(state::AppState, args::Dict{String,Any})
 
     return tool_result_json(result)
 end
-
 # --- format_file ---
 
 function tool_format_file(state::AppState, args::Dict{String,Any})
-    jw = state.workspace
+    workspace = resolve_workspace(state, args)
+    jw = workspace.workspace
     jw === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
 
     path = args["path"]::String
-    uri = resolve_uri(path)
-    with_workspace_lock(() -> JuliaWorkspaces.has_file(jw, uri), state) ||
+    uri = with_workspace_lock(workspace) do
+        resolve_uri(path)
+    end
+    with_workspace_lock(() -> JuliaWorkspaces.has_file(jw, uri), workspace) ||
         return tool_result_error("File is not part of the workspace: $path")
 
     start_line = get(args, "start_line", nothing)
@@ -190,7 +208,7 @@ function tool_format_file(state::AppState, args::Dict{String,Any})
     end
 
     edit = try
-        with_workspace_lock(state) do
+        with_workspace_lock(workspace) do
             start_line === nothing ?
                 JuliaWorkspaces.get_format_edits(jw, uri) :
                 JuliaWorkspaces.get_format_edits(jw, uri, start_line, stop_line)
@@ -199,8 +217,6 @@ function tool_format_file(state::AppState, args::Dict{String,Any})
         return tool_result_error("Formatting failed: $(sprint(showerror, err))")
     end
 
-    # A file the JuliaFormat.toml configuration excludes is not an error; it
-    # is simply not formatted.
     if edit === nothing
         return tool_result_json(Dict{String,Any}(
             "uri" => string(uri),
@@ -216,14 +232,14 @@ function tool_format_file(state::AppState, args::Dict{String,Any})
     result["already_formatted"] = isempty(edit.edits)
 
     if something(get(args, "apply", nothing), false) && !isempty(edit.edits)
-        file_path = JuliaWorkspaces.uri2filepath(uri)
-        with_workspace_lock(state) do
+        with_workspace_lock(workspace) do
+            file_path = JuliaWorkspaces.uri2filepath(uri)
             content = JuliaWorkspaces.get_text_file(jw, uri).content
             write(file_path, apply_text_edits(content, edit.edits))
             JuliaWorkspaces.update_file_from_disc!(jw, file_path)
+            haskey(workspace.watcher_snapshot, file_path) &&
+                (workspace.watcher_snapshot[file_path] = mtime(file_path))
         end
-        # The watcher must not re-report the write we just made.
-        haskey(state.watcher_snapshot, file_path) && (state.watcher_snapshot[file_path] = mtime(file_path))
 
         notify_resource_updated(state, "workspace://testitems")
         notify_resource_updated(state, "workspace://detection-errors")
@@ -240,30 +256,26 @@ end
 # --- list_testitems ---
 
 function tool_list_testitems(state::AppState, args::Dict{String,Any})
-    state.workspace === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
-
+    workspace = resolve_workspace(state, args)
     filter = build_filter(args)
-    items = collect_testitems_list(state; filter=filter)
+    items = collect_testitems_list(state; workspace=workspace, filter=filter)
 
     return tool_result_json(items)
 end
-
 # --- run_testitems ---
 
 function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_token=nothing)
-    state.workspace === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
+    workspace = resolve_workspace(state, args)
 
-    # Validated before anything is started, so a bad value costs nothing. `Bool <: Real`,
-    # hence the explicit exclusion; JSON `true` is not a number of seconds.
     max_wait = something(get(args, "max_wait_seconds", nothing), MAX_WAIT_SECONDS_DEFAULT)
     (max_wait isa Real && !(max_wait isa Bool) && isfinite(max_wait) && max_wait >= 0) ||
         return tool_result_error("max_wait_seconds must be a non-negative number of seconds.")
     max_wait = Float64(max_wait)
 
-    init_controller!(state)
+    init_controller!(state, workspace)
 
     filter = build_filter(args)
-    d = discover(state; filter=filter)
+    d = discover(state; workspace=workspace, filter=filter)
 
     if isempty(d)
         return tool_result_text("No test items matched the given filter.")
@@ -273,8 +285,6 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
     testrun_id = string(UUIDs.uuid4())
     timeout = filter !== nothing ? get(filter, :timeout, nothing) : nothing
 
-    # Register test run record with pending items — before the run starts, so the event
-    # sink finds it and progress totals are right from the first event.
     run_record = TestRunRecord(
         testrun_id,
         :running,
@@ -288,7 +298,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
         nothing,
     )
     lock(state.lock) do
-        state.runs[testrun_id] = run_record
+        workspace.runs[testrun_id] = run_record
     end
     notify_resource_list_changed(state)
 
@@ -302,14 +312,14 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
     mcp_info(state, "tools", "Starting test run $testrun_id with $(length(items)) item(s)")
 
     run = try
-        r = TIR.run_async!(state.session, d;
+        r = TIR.run_async!(workspace.session, d;
             profiles = [run_profile(args)],
             timeout = timeout,
             fail_on_definition_error = false,
             id = testrun_id,
             run_options(args)...)
         lock(state.lock) do
-            state.active_runs[testrun_id] = r
+            workspace.active_runs[testrun_id] = r
         end
         r
     catch e
@@ -321,31 +331,18 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
         return tool_result_error("Test run failed: $e")
     end
 
-    # `run.done` is a `Threads.Event` with no timed wait, and a helper task parked in
-    # `wait(run.done)` would be leaked by exactly the run this bound exists for — one that
-    # never finishes. Polling `istaskdone` leaves nothing behind on either exit path.
     if timedwait(() -> istaskdone(run), max_wait; pollint=0.1) === :ok
-        summary = finish_run!(state, run_record, run)
+        summary = finish_run!(state, workspace, run_record, run)
         summary === nothing && return tool_result_error("Test run failed: $(run.error)")
         return tool_result_json(collect_run_payload(state, run_record, summary, args))
     end
 
-    # The wait ran out first. The run keeps going: the record stays `:running`, the run stays
-    # in `active_runs` so `julia_cancel_testrun` can reach it, and a detached task records
-    # the outcome when the run eventually ends. Progress belonged to the request being
-    # answered now, so it stops here — clearing the token is what actually disarms both the
-    # heartbeat tick already sleeping and the per-event reports; MCP forbids progress after
-    # the response, and a final `progress == total` would falsely signal completion.
     stop_heartbeat!(run_record)
     lock(state.lock) do
         run_record.progress_token = nothing
     end
     mcp_warn(state, "tools", "Test run $testrun_id still running after $(max_wait)s; returning early, the run continues")
 
-    # Built before the finalizer is detached, so the response is consistent with itself: the
-    # only thing that can have moved the record off `:running` by now is a concurrent cancel,
-    # which is exactly a state worth reporting. A run that finishes between the wait expiring
-    # and this point is reported as running; the next poll says completed.
     summary = lock(state.lock) do
         run_summary(run_record)
     end
@@ -354,7 +351,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
     payload["message"] = running_message(summary, max_wait)
 
     @async try
-        finish_run!(state, run_record, run)
+        finish_run!(state, workspace, run_record, run)
     catch e
         @error "Finalizing test run $testrun_id after early return failed" exception = (e, catch_backtrace())
     end
@@ -363,26 +360,20 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
 end
 
 """
-Wait for `run` to finish and record its outcome on `run_record`: terminal status, coverage,
-the final progress notification, resource updates and the completion log line. Returns the
-run summary, or `nothing` when the run errored (`run.error` holds the exception and the
-record is already marked `:errored`). A cancel that landed first wins, as before.
-
-Called synchronously by `tool_run_testitems` when the run finishes within `max_wait_seconds`,
-and otherwise from a detached task after the tool call has already returned — so nothing in
-here may assume a request is still open, and the run's status is read from the `TestRun`
-itself rather than looked up through `state.session`, which shutdown nulls.
+Wait for `run` to finish and record its outcome on `run_record`.
 """
-function finish_run!(state::AppState, run_record::TestRunRecord, run::TIR.TestRun)
+function finish_run!(
+    state::AppState,
+    workspace::Workspace,
+    run_record::TestRunRecord,
+    run::TIR.TestRun,
+)
     testrun_id = run_record.id
 
     result = try
         fetch(run)
     catch e
         lock(state.lock) do
-            # An explicit cancel may already have recorded a terminal status, and the error it
-            # provoked shouldn't overwrite it. The failure still reaches the caller via the
-            # error result when a request is waiting, and via the log either way.
             finalize_run_status!(run_record, :errored)
         end
         mcp_error(state, "tools", "Test run $testrun_id failed: $e")
@@ -390,13 +381,11 @@ function finish_run!(state::AppState, run_record::TestRunRecord, run::TIR.TestRu
     finally
         stop_heartbeat!(run_record)
         lock(state.lock) do
-            delete!(state.active_runs, testrun_id)
+            delete!(workspace.active_runs, testrun_id)
         end
     end
 
     lock(state.lock) do
-        # A cancelled run returns normally with its partial result; the run's own status
-        # tells the two apart.
         finalize_run_status!(run_record, run.status === :cancelled ? :cancelled : :completed)
         if result.coverage !== nothing
             run_record.coverage = coverage_to_dicts(result.coverage)
@@ -477,9 +466,13 @@ end
 
 function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_token=nothing)
     testrun_id = args["testrun_id"]::String
+    workspace = haskey(args, "workspace_id") ?
+        resolve_workspace(state, args) :
+        find_workspace_for_run(state, testrun_id)
+    workspace === nothing && return tool_result_error("Test run not found: $testrun_id")
 
     prev_run = lock(state.lock) do
-        get(state.runs, testrun_id, nothing)
+        get(workspace.runs, testrun_id, nothing)
     end
     prev_run === nothing && return tool_result_error("Test run not found: $testrun_id")
 
@@ -488,10 +481,9 @@ function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_tok
     end
     isempty(failed_ids) && return tool_result_text("No failed or errored items in run $testrun_id.")
 
-    # Build new run args with the failed IDs
     new_args = copy(args)
     new_args["items"] = failed_ids
-    # Preserve original profile params
+    new_args["workspace_id"] = workspace_id_for(state, workspace)
     for key in ("julia_cmd", "julia_args", "max_workers", "timeout", "mode", "max_wait_seconds")
         if haskey(prev_run.profile_params, key) && !haskey(new_args, key)
             new_args[key] = prev_run.profile_params[key]
@@ -502,22 +494,25 @@ function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_tok
 end
 
 # --- cancel_testrun ---
-
 function tool_cancel_testrun(state::AppState, args::Dict{String,Any})
     testrun_id = args["testrun_id"]::String
+    workspace = haskey(args, "workspace_id") ?
+        resolve_workspace(state, args) :
+        find_workspace_for_run(state, testrun_id)
+    workspace === nothing && return tool_result_error("No test run with ID: $testrun_id")
 
     run = lock(state.lock) do
-        get(state.active_runs, testrun_id, nothing)
+        get(workspace.active_runs, testrun_id, nothing)
     end
     run === nothing && return tool_result_error("No active test run with ID: $testrun_id")
 
     TIR.cancel!(run)
 
     lock(state.lock) do
-        run = get(state.runs, testrun_id, nothing)
-        if run !== nothing
-            finalize_run_status!(run, :cancelled)
-            stop_heartbeat!(run)
+        record = get(workspace.runs, testrun_id, nothing)
+        if record !== nothing
+            finalize_run_status!(record, :cancelled)
+            stop_heartbeat!(record)
         end
     end
 
@@ -525,13 +520,15 @@ function tool_cancel_testrun(state::AppState, args::Dict{String,Any})
     return tool_result_text("Test run $testrun_id cancelled. Results collected so far stay available via julia_get_testrun_results.")
 end
 
-# --- get_testrun_results ---
-
 function tool_get_testrun_results(state::AppState, args::Dict{String,Any})
     testrun_id = args["testrun_id"]::String
+    workspace = haskey(args, "workspace_id") ?
+        resolve_workspace(state, args) :
+        find_workspace_for_run(state, testrun_id)
+    workspace === nothing && return tool_result_error("Test run not found: $testrun_id")
 
     run = lock(state.lock) do
-        get(state.runs, testrun_id, nothing)
+        get(workspace.runs, testrun_id, nothing)
     end
     run === nothing && return tool_result_error("Test run not found: $testrun_id")
 
@@ -557,8 +554,12 @@ function tool_get_testitem_detail(state::AppState, args::Dict{String,Any})
     unique!(ids)
     isempty(ids) && return tool_result_error("Provide testitem_ids (or testitem_id) for the items to inspect.")
 
+    workspace = haskey(args, "workspace_id") ?
+        resolve_workspace(state, args) :
+        find_workspace_for_run(state, testrun_id)
+    workspace === nothing && return tool_result_error("Test run not found: $testrun_id")
     run = lock(state.lock) do
-        get(state.runs, testrun_id, nothing)
+        get(workspace.runs, testrun_id, nothing)
     end
     run === nothing && return tool_result_error("Test run not found: $testrun_id")
 
@@ -631,8 +632,9 @@ end
 # --- list_testruns ---
 
 function tool_list_testruns(state::AppState, args::Dict{String,Any})
+    workspace = resolve_workspace(state, args)
     runs = lock(state.lock) do
-        [run_summary(run) for run in values(state.runs)]
+        [run_summary(run) for run in values(workspace.runs)]
     end
     return tool_result_json(runs)
 end
@@ -640,6 +642,7 @@ end
 # --- list_test_processes ---
 
 function tool_list_test_processes(state::AppState, args::Dict{String,Any})
+    workspace = resolve_workspace(state, args)
     procs = [
         Dict{String,Any}(
             "id" => p.id,
@@ -647,17 +650,21 @@ function tool_list_test_processes(state::AppState, args::Dict{String,Any})
             "status" => p.status,
             "package_uri" => p.package_uri,
             "project_uri" => something(p.project_uri, ""),
-        ) for p in list_test_processes(state)
+        ) for p in list_test_processes(workspace)
     ]
     return tool_result_json(procs)
 end
 
-# --- terminate_test_process ---
-
 function tool_terminate_test_process(state::AppState, args::Dict{String,Any})
     process_id = args["process_id"]::String
-    state.session === nothing && return tool_result_error("Controller not initialized.")
-    TIR.terminate_process!(state.session, process_id)
+    workspace = haskey(args, "workspace_id") ?
+        resolve_workspace(state, args) :
+        find_workspace_for_process(state, process_id)
+    workspace === nothing && return tool_result_error("Test process not found: $process_id")
+    workspace.session === nothing && return tool_result_error("Controller not initialized.")
+    with_workspace_lock(workspace) do
+        TIR.terminate_process!(workspace.session, process_id)
+    end
     return tool_result_text("Process $process_id termination requested.")
 end
 
@@ -665,9 +672,13 @@ end
 
 function tool_get_coverage_results(state::AppState, args::Dict{String,Any})
     testrun_id = args["testrun_id"]::String
+    workspace = haskey(args, "workspace_id") ?
+        resolve_workspace(state, args) :
+        find_workspace_for_run(state, testrun_id)
+    workspace === nothing && return tool_result_error("Test run not found: $testrun_id")
 
     coverage = lock(state.lock) do
-        run = get(state.runs, testrun_id, nothing)
+        run = get(workspace.runs, testrun_id, nothing)
         run === nothing && return :not_found
         run.coverage === nothing && return :no_coverage
         run.coverage
@@ -680,8 +691,13 @@ end
 
 # --- Helpers ---
 
-"The test processes of the session, or none when there is no session yet."
-list_test_processes(state::AppState) = state.session === nothing ? TIR.ProcessInfo[] : TIR.list_processes(state.session)
+"""Return the test processes of a workspace."""
+function list_test_processes(workspace::Workspace)
+    return with_workspace_lock(workspace) do
+        session = workspace.session
+        session === nothing ? TIR.ProcessInfo[] : TIR.list_processes(session)
+    end
+end
 
 function build_filter(args::Dict{String,Any})
     filter = Dict{Symbol,Any}()
