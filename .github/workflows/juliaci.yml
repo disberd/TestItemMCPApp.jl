@@ -13,6 +13,11 @@ jobs:
       include-all-compatible-minor-versions: true
       include-rc-versions: true
       filter: 'dirname(filename) == joinpath(pwd(), "test")'
+      # Stop a test item after 45 minutes; the slowest item takes about 7 minutes on CI.
+      # Before the kill, the test process writes the backtraces of all its tasks into the
+      # output of the item. Without a limit, an item that blocks keeps the job busy until
+      # GitHub cancels it.
+      testitem-timeout: '2700'
     permissions: write-all
     secrets:
       codecov_token: ${{ secrets.CODECOV_TOKEN }}
