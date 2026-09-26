@@ -36,7 +36,6 @@ The fork adds these changes to upstream:
 | Several workspaces in one process, each with its own `workspace_id`, test runs, test processes, resources, and notifications. See [Several clients, one server](#several-clients-one-server). | [`38b4af0`](https://github.com/disberd/TestItemMCPApp.jl/commit/38b4af0ccc645a8b801ba11c02edf23a67b58f09), [`3b7ae29`](https://github.com/disberd/TestItemMCPApp.jl/commit/3b7ae290c36ec17eab3bfb2b44d8ba3f111fc538) |
 | An idle reaper that closes unused workspaces and sessions, and the `julia_close_workspace` tool. | [`b649de8`](https://github.com/disberd/TestItemMCPApp.jl/commit/b649de8bf07bb879fa540b472f3edb08c66d47aa) |
 | Pass-through tools and arguments for TestItemRuns features: `julia_env` and `log_level` on test runs, `julia_get_process_output`, and `julia_terminate_all_processes`. | [`5cfe129`](https://github.com/disberd/TestItemMCPApp.jl/commit/5cfe129c479057b29a7def136e73fa776ef0b8ab) |
-| `max_workers = 1` as the default for a test run, to keep the load low when several clients share the server. Upstream uses `min(Sys.CPU_THREADS, 8)`. | [`5cfe129`](https://github.com/disberd/TestItemMCPApp.jl/commit/5cfe129c479057b29a7def136e73fa776ef0b8ab) |
 | `julia_get_diagnostics` with `path` obeys `wait_for_ready`. The fork also proposes this fix upstream. | [`73da529`](https://github.com/disberd/TestItemMCPApp.jl/commit/73da52949562e5a8851102ac152f9e8ddb189c1f) |
 
 Fork pull requests #1 to #5 targeted the code before JuliaMCP, when the package was `TestItemMCPApp` and the app was `juliatimcp`.
@@ -96,8 +95,7 @@ item rather than the call.
 `julia_run_testitems` and `julia_rerun_failed` also take `julia_env` and `log_level`.
 `julia_env` sets environment variables for the test processes, and a `null` value removes a
 variable. `log_level` is the minimum log level of the code under test. `julia_rerun_failed`
-uses the values of the original run unless the call gives new values. `max_workers` is 1 by
-default.
+uses the values of the original run unless the call gives new values.
 
 The code analysis tools, the test item tools, and `julia_close_workspace` take an optional
 `workspace_id`. See [Several clients, one server](#several-clients-one-server).
