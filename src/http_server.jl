@@ -152,6 +152,8 @@ function parse_message(body::AbstractString)
     method = message["method"]
     params = get(message, "params", nothing)
     id = get(message, "id", nothing)
+    # JSON gives an integer as Int64, but `JSONRPC.Request` keeps an `Int`: Int32 on 32-bit Julia.
+    id isa Int64 && typemin(Int) <= id <= typemax(Int) && (id = Int(id))
     (method isa String && params isa Union{Nothing,Dict{String,Any},Vector{Any}} &&
      id isa Union{Nothing,String,Int}) || return nothing
     return JSONRPC.Request(method, params, id, nothing)
