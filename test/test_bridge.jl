@@ -107,7 +107,7 @@ end
     @test opts.julia_args == ["--check-bounds=yes"]
     defaults = JuliaMCP.run_options(Dict{String,Any}())
     @test defaults.julia_num_threads === nothing
-    @test defaults.max_workers == 1
+    @test defaults.max_workers == JuliaMCP.TIR.default_max_workers()
     @test defaults.log_level === :Info
     @test JuliaMCP.run_options(Dict{String,Any}("log_level" => "Debug")).log_level === :Debug
     env = Dict{String,Any}("SET_ME" => "1", "UNSET_ME" => nothing)

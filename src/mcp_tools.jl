@@ -232,7 +232,7 @@ function tool_definitions()
                     ),
                     "max_workers" => Dict{String,Any}(
                         "type" => "integer",
-                        "description" => "Maximum number of parallel test processes (default: 1).",
+                        "description" => "Maximum number of parallel test processes (default: the number of CPU threads, at most 8 and at most one per 3 GiB of system memory).",
                     ),
                     "julia_env" => Dict{String,Any}(
                         "type" => "object",

@@ -75,7 +75,7 @@ function run_options(params::Dict{String,Any})
         julia_cmd = get(params, "julia_cmd", "julia")::String,
         julia_args = convert(Vector{String}, get(params, "julia_args", String[])),
         julia_num_threads = julia_num_threads,
-        max_workers = Int(get(params, "max_workers", 1)::Integer),
+        max_workers = Int(get(() -> TIR.default_max_workers(), params, "max_workers")::Integer),
         log_level = Symbol(something(get(params, "log_level", nothing), "Info")::String),
     )
 end

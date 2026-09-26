@@ -37,7 +37,7 @@
     end
 end
 
-@testitem "process tools: default worker count, output and terminate all" setup=[MCPTestHelpers] tags=[:e2e] begin
+@testitem "process tools: output and terminate all" setup=[MCPTestHelpers] tags=[:e2e] begin
     using .MCPTestHelpers
 
     MCPTestHelpers.with_mcp_server() do client
@@ -45,7 +45,7 @@ end
         MCPTestHelpers.call_tool(client, "julia_set_workspace_folders",
             Dict{String,Any}("folders" => [pkg], "watch" => false))
         run = MCPTestHelpers.call_tool(client, "julia_run_testitems",
-            Dict{String,Any}("max_wait_seconds" => 300))
+            MCPTestHelpers.to_completion(Dict{String,Any}("max_workers" => 1)))
         @test !MCPTestHelpers.is_error(run)
 
         procs = MCPTestHelpers.result_json(MCPTestHelpers.call_tool(client, "julia_list_test_processes"))
