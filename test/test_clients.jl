@@ -33,13 +33,16 @@ end
 
 @testitem "closing the POST of a test run cancels that run within 3 s" setup=[HTTPTestHelpers] tags=[:e2e] begin
     using .HTTPTestHelpers: with_http_server, post, tool_call, initialize, set_up, testruns, raw_post, events,
-        body, wait_until
+        body, tool_json, wait_until
+    using Dates
 
     with_http_server() do server
         a = initialize(server)
         b = initialize(server)
         set_up(server, a, "HangPkg")
-        hang = Dict{String,Any}("name_pattern" => "^hangs", "max_wait_seconds" => 300)
+        hang = Dict{String,Any}("name_pattern" => "^hangs", "max_wait_seconds" => 3600)
+        listed(run) = only(s for s in tool_json(post(server, tool_call(90, "julia_list_testruns"); session=b))
+            if s["testrun_id"] == run)
 
         socket = raw_post(server, tool_call(3, "julia_run_testitems", hang); session=a)
         @test wait_until(() -> length(testruns(server, b)) == 1, 60)
@@ -47,12 +50,17 @@ end
         b_call = @async post(server, tool_call(3, "julia_run_testitems", hang); session=b)
         @test wait_until(() -> length(testruns(server, b)) == 2, 60)
         b_run = only(setdiff(keys(testruns(server, b)), [a_run]))
+        # Close the POST when both test items run. While a test process starts, this process
+        # is busy, and Julia fires timers, such as the keepalive of the stream, only when
+        # thread 1 is free. The first start of a test process can take minutes on CI.
+        @test wait_until(() -> listed(a_run)["running"] == listed(b_run)["running"] == 1, 1800; interval=0.5)
 
-        closed_at = time()
+        closed_at = now()
         close(socket)
-        @test wait_until(() -> testruns(server, b)[a_run] == "cancelled", 10; interval=0.1)
-        @test time() - closed_at < 3
-        @test testruns(server, b)[b_run] == "running"
+        @test wait_until(() -> listed(a_run)["status"] == "cancelled", 60)
+        # Other work on thread 1 can delay the answer to a poll, so use the time of the cancel.
+        @test DateTime(listed(a_run)["completed_at"]) - closed_at < Second(3)
+        @test listed(b_run)["status"] == "running"
 
         post(server, tool_call(4, "julia_cancel_testrun", Dict{String,Any}("testrun_id" => b_run)); session=b)
         @test last(events(body(fetch(b_call))))["id"] == 3

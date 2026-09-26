@@ -7,6 +7,10 @@ const SSE_KEEPALIVE_SECS = 60.0
 # A `tools/call` stream gets `: keepalive` after this many seconds of silence. HTTP.jl does
 # not tell a handler that the client closed the connection, but a write to a closed
 # connection fails. This write is how the server sees that the client closed the request.
+# After a reset from the client, the first write fails. After a FIN, the second write fails.
+# ponytail: Julia fires timers only when thread 1 is free, so work on thread 1 that does not
+# yield delays the keepalive and the cancel. A task that waits in `eof` on the Reseau
+# connection does not need thread 1, but it reads internal fields of HTTP.jl.
 const TOOL_CALL_KEEPALIVE_SECS = 1.0
 # The `Origin` of a page that this host serves. The server refuses all other origins.
 const LOCAL_ORIGIN = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
