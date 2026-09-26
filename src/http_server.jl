@@ -2,8 +2,12 @@
 
 const HTTP_PORT_DEFAULT = 50020
 const MCP_PATH = "/mcp"
-# An SSE stream with no other output for this many seconds gets a `: keepalive` comment.
+# A GET stream with no other output for this many seconds gets a `: keepalive` comment.
 const SSE_KEEPALIVE_SECS = 60.0
+# A `tools/call` stream gets `: keepalive` after this many seconds of silence. HTTP.jl does
+# not tell a handler that the client closed the connection, but a write to a closed
+# connection fails. This write is how the server sees that the client closed the request.
+const TOOL_CALL_KEEPALIVE_SECS = 1.0
 # The `Origin` of a page that this host serves. The server refuses all other origins.
 const LOCAL_ORIGIN = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
 
@@ -235,8 +239,10 @@ end
 
 """
 Answer a POST with one JSON-RPC message. A `tools/call` gets an SSE stream: first the
-notifications that the call causes, then the response. Other requests get the response as
-JSON. A notification, or a response from the client, gets 202 and no body.
+notifications that the call causes, then the response. When a write to the stream fails,
+the client closed the request, and the server cancels the test run of the call. Other
+requests get the response as JSON. A notification, or a response from the client, gets 202
+and no body.
 """
 function handle_post(state::AppState, inbox::Channel, http::HTTP.Stream, request, body::String)
     msg = parse_message(body)
@@ -248,12 +254,17 @@ function handle_post(state::AppState, inbox::Channel, http::HTTP.Stream, request
     msg isa JSONRPC.Request || return respond(http, 202)
 
     outbox = Outbox(Inf)
-    put!(inbox, (client, outbox, msg))
+    pending = open_request!(state, client, msg)
+    put!(inbox, (client, outbox, msg, pending))
     msg.id === nothing && return respond(http, 202)
     if msg.method == "tools/call"
-        start_event_stream(http)
         try
-            write_events(http, outbox)
+            start_event_stream(http)
+            write_events(http, outbox; keepalive=TOOL_CALL_KEEPALIVE_SECS)
+        catch
+            mcp_info(state, "transport", "Client $(client.id) closed request $(msg.id) before the response")
+            cancel_request!(state, pending)
+            rethrow()
         finally
             # When the client went away, drop the messages that come later.
             close(outbox)
@@ -296,16 +307,13 @@ function handle_get(state::AppState, http::HTTP.Stream, request)
 end
 
 """
-Remove the client. Its GET stream ends, and its next request gets 404.
+Remove the client, as [`remove_client!`](@ref) does. Its GET stream ends, its sessions
+die, and its next request gets 404.
 """
 function handle_delete(state::AppState, http::HTTP.Stream, request)
     client = request_client(state, request)
     client isa Client || return respond_error(http, client...)
-    outbox = lock(state.lock) do
-        delete!(state.clients, client.id)
-        client.outbox
-    end
-    outbox isa Outbox && close(outbox)
+    remove_client!(state, client.id)
     mcp_info(state, "transport", "Removed client $(client.id) on DELETE")
     return respond(http, 200)
 end
@@ -320,7 +328,7 @@ server closes. To stop, call [`stop_http_server`](@ref).
 function start_http_server(token::AbstractString; port::Integer)
     idle_timeout = idle_timeout_secs()
     state = AppState()
-    inbox = Channel{Tuple{Client,Outbox,JSONRPC.Request}}(Inf)
+    inbox = Channel{Tuple{Client,Outbox,JSONRPC.Request,Union{Nothing,OpenRequest}}}(Inf)
     bound_port = Ref(Int(port))
     server = try
         HTTP.listen!("127.0.0.1", port) do http
@@ -338,7 +346,7 @@ function start_http_server(token::AbstractString; port::Integer)
               "Another process can use port $port. Set a different port with --port or JULIAMCP_PORT.")
     end
     bound_port[] = HTTP.port(server)
-    task = @async serve_http(state, server, inbox, start_reaper(state, idle_timeout))
+    task = @async serve_http(state, server, inbox, start_reaper(state, idle_timeout; clients=true))
     return (; state, server, task)
 end
 
@@ -363,9 +371,9 @@ function serve_http(state::AppState, server::HTTP.Server, inbox::Channel, reaper
         close(inbox)
     end
     try
-        for (client, outbox, msg) in inbox
+        for (client, outbox, msg, request) in inbox
             @async try
-                handle_message(state, client, outbox, msg)
+                handle_message(state, client, outbox, msg; request)
             finally
                 # This ends the HTTP response.
                 close(outbox)

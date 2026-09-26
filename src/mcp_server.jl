@@ -49,19 +49,23 @@ end
 function serve_loop(state::AppState, client::Client, endpoint::JSONRPC.JSONRPCEndpoint)
     while true
         msg = JSONRPC.get_next_message(endpoint)
-        @async handle_message(state, client, endpoint, msg)
+        request = open_request!(state, client, msg)
+        @async handle_message(state, client, endpoint, msg; request)
     end
 end
 
 """
 Handle `msg` from `client`. Send the response to `sink`, together with the notifications
-that the request causes, such as its progress.
+that the request causes, such as its progress. `request` is the [`OpenRequest`](@ref) of
+`msg` from [`open_request!`](@ref). This call closes it at the end.
 """
-function handle_message(state::AppState, client::Client, sink, msg::JSONRPC.Request)
+function handle_message(state::AppState, client::Client, sink, msg::JSONRPC.Request; request=nothing)
     try
-        dispatch_mcp_message(state, client, sink, msg)
+        dispatch_mcp_message(state, client, sink, msg; request)
     catch e
         report_handler_error(state, sink, msg, e, catch_backtrace())
+    finally
+        request === nothing || close_request!(state, client, request)
     end
     return
 end
@@ -91,7 +95,7 @@ function report_handler_error(state::AppState, sink, msg::JSONRPC.Request, e, ba
     return
 end
 
-function dispatch_mcp_message(state::AppState, client::Client, sink, msg::JSONRPC.Request)
+function dispatch_mcp_message(state::AppState, client::Client, sink, msg::JSONRPC.Request; request=nothing)
     method = msg.method
     params = msg.params === nothing ? Dict{String,Any}() : msg.params
 
@@ -104,6 +108,19 @@ function dispatch_mcp_message(state::AppState, client::Client, sink, msg::JSONRP
 
     if method == "notifications/initialized"
         # Client acknowledged initialization — nothing to do
+        return
+    end
+
+    # A cancel for an unknown request id, or for a request of another client, does nothing.
+    if method == "notifications/cancelled"
+        id = get(params, "requestId", nothing)
+        cancelled = lock(state.lock) do
+            get(client.requests, id, nothing)
+        end
+        if cancelled !== nothing
+            mcp_info(state, "transport", "Client $(client.id) cancelled request $id")
+            cancel_request!(state, cancelled)
+        end
         return
     end
 
@@ -128,7 +145,7 @@ function dispatch_mcp_message(state::AppState, client::Client, sink, msg::JSONRP
             arguments = Dict{String,Any}()
         end
         result = handle_tool_call(state, tool_name, arguments;
-            progress_token=progress_token_of(params), progress_sink=sink)
+            client, request, progress_token=progress_token_of(params), progress_sink=sink)
         send_result(sink, msg, result)
         return
     end

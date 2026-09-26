@@ -2,6 +2,7 @@
 
 using JuliaMCP
 using JuliaMCP: HTTP, JSON
+using Sockets
 
 const TESTDATA_DIR = joinpath(dirname(@__DIR__), "testdata")
 
@@ -70,9 +71,47 @@ Return the JSON-RPC messages in the SSE text `text`.
 events(text) = [JSON.parse(line[7:end]) for line in split(text, '\n') if startswith(line, "data: ")]
 
 """
+Return the tool result in the SSE response of a `tools/call`.
+"""
+tool_result(response) = last(events(body(response)))["result"]
+
+"""
 Return the JSON value in the text content of the tool result of the SSE response.
 """
-tool_json(response) = JSON.parse(only(last(events(body(response)))["result"]["content"])["text"])
+tool_json(response) = JSON.parse(only(tool_result(response)["content"])["text"])
+
+"""
+Set up the workspace of the fixture `pkg` for `session`, with no file watcher.
+"""
+set_up(server, session, pkg) = post(server, tool_call(2, "julia_set_workspace_folders",
+    Dict{String,Any}("folders" => [joinpath(TESTDATA_DIR, pkg)], "watch" => false)); session)
+
+"""
+Return the status of each test run in the workspace of `session`, by test run id.
+"""
+testruns(server, session) = Dict(run["testrun_id"] => run["status"]
+    for run in tool_json(post(server, tool_call(90, "julia_list_testruns"); session)))
+
+"""
+Send `message` as one POST on a new TCP connection, and read the head of the response.
+Return the open socket. To close the request, close the socket.
+"""
+function raw_post(server, message; session)
+    text = JSON.json(message)
+    socket = Sockets.connect("127.0.0.1", server.port)
+    write(socket,
+        "POST /mcp HTTP/1.1\r\n",
+        "Host: 127.0.0.1:$(server.port)\r\n",
+        "Authorization: Bearer $(server.token)\r\n",
+        "Mcp-Session-Id: $session\r\n",
+        "Content-Type: application/json\r\n",
+        "Accept: application/json, text/event-stream\r\n",
+        "Content-Length: $(sizeof(text))\r\n\r\n",
+        text)
+    head = readuntil(socket, "\r\n\r\n")
+    startswith(head, "HTTP/1.1 200") || error("The POST failed: $head")
+    return socket
+end
 
 function wait_until(f, timeout; interval=0.05)
     deadline = time() + timeout
@@ -314,7 +353,9 @@ end
     outbox = JuliaMCP.Outbox(Inf)
     io = IOBuffer()
     writer = @async JuliaMCP.write_events(io, outbox; keepalive=0.2)
-    sleep(0.7)
+    # Wait for the first keepalive. In a new process, the first call of `write_events` can
+    # compile for longer than the silence.
+    @test timedwait(() -> position(io) > 0, 30.0) === :ok
     put!(outbox, "{\"jsonrpc\":\"2.0\"}")
     close(outbox)
     wait(writer)

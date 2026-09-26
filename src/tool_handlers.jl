@@ -28,27 +28,32 @@ function validate_tool_arguments(tool_name::String, arguments::Dict{String,Any})
     return tool_result_error("Missing required argument(s) for $tool_name: $(join(missing_args, ", "))")
 end
 
-function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{String,Any}; progress_token=nothing, progress_sink=nothing)
+"""
+Run the tool `tool_name` with `arguments` for `client`. `request` is the
+[`OpenRequest`](@ref) of the call, so that a cancel of the call also cancels its test run.
+"""
+function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{String,Any};
+    client=nothing, request=nothing, progress_token=nothing, progress_sink=nothing)
     invalid = validate_tool_arguments(tool_name, arguments)
     invalid === nothing || return invalid
 
     try
         if tool_name == "julia_set_workspace_folders"
-            return tool_set_workspace_folders(state, arguments)
+            return tool_set_workspace_folders(state, arguments; client)
         elseif tool_name == "julia_close_workspace"
-            return tool_close_workspace(state, arguments)
+            return tool_close_workspace(state, arguments; client)
         elseif tool_name == "julia_update_file"
-            return tool_update_file(state, arguments)
+            return tool_update_file(state, arguments; client)
         elseif tool_name == "julia_get_diagnostics"
-            return tool_get_diagnostics(state, arguments)
+            return tool_get_diagnostics(state, arguments; client)
         elseif tool_name == "julia_format_file"
-            return tool_format_file(state, arguments)
+            return tool_format_file(state, arguments; client)
         elseif tool_name == "julia_list_testitems"
-            return tool_list_testitems(state, arguments)
+            return tool_list_testitems(state, arguments; client)
         elseif tool_name == "julia_run_testitems"
-            return tool_run_testitems(state, arguments; progress_token, progress_sink)
+            return tool_run_testitems(state, arguments; client, request, progress_token, progress_sink)
         elseif tool_name == "julia_rerun_failed"
-            return tool_rerun_failed(state, arguments; progress_token, progress_sink)
+            return tool_rerun_failed(state, arguments; request, progress_token, progress_sink)
         elseif tool_name == "julia_cancel_testrun"
             return tool_cancel_testrun(state, arguments)
         elseif tool_name == "julia_get_testrun_results"
@@ -56,19 +61,19 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
         elseif tool_name == "julia_get_testitem_detail"
             return tool_get_testitem_detail(state, arguments)
         elseif tool_name == "julia_list_testruns"
-            return tool_list_testruns(state, arguments)
+            return tool_list_testruns(state, arguments; client)
         elseif tool_name == "julia_list_test_processes"
-            return tool_list_test_processes(state, arguments)
+            return tool_list_test_processes(state, arguments; client)
         elseif tool_name == "julia_terminate_test_process"
             return tool_terminate_test_process(state, arguments)
         elseif tool_name == "julia_get_process_output"
             return tool_get_process_output(state, arguments)
         elseif tool_name == "julia_terminate_all_processes"
-            return tool_terminate_all_processes(state, arguments)
+            return tool_terminate_all_processes(state, arguments; client)
         elseif tool_name == "julia_get_coverage_results"
             return tool_get_coverage_results(state, arguments)
         elseif tool_name == "julia_create_session"
-            return tool_create_session(state, arguments)
+            return tool_create_session(state, arguments; client)
         elseif tool_name == "julia_eval_code"
             return tool_eval_code(state, arguments)
         elseif tool_name == "julia_interrupt_session"
@@ -92,7 +97,7 @@ end
 
 # --- set_workspace_folders ---
 
-function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
+function tool_set_workspace_folders(state::AppState, args::Dict{String,Any}; client=nothing)
     folders = normalize_workspace_folders(args["folders"])
     id = workspace_id(folders)
     mcp_info(state, "tools", "Setting workspace folders: $folders")
@@ -104,6 +109,8 @@ function tool_set_workspace_folders(state::AppState, args::Dict{String,Any})
         # Mark it as used under the same lock as the lookup. Then the idle reaper cannot
         # close it before the setup below.
         found.last_used_at = Dates.now()
+        # Later tool calls of this client without a workspace_id use this workspace.
+        client === nothing || (client.workspace_id = id)
         found
     end
     stop_watcher!(workspace)
@@ -145,8 +152,8 @@ end
 
 # --- close_workspace ---
 
-function tool_close_workspace(state::AppState, args::Dict{String,Any})
-    workspace = resolve_workspace(state, args)
+function tool_close_workspace(state::AppState, args::Dict{String,Any}; client=nothing)
+    workspace = resolve_workspace(state, args; client)
     id = workspace_id_for(state, workspace)
     status = id === nothing ? :not_found : close_workspace!(state, id)
     if status === :active_runs
@@ -167,12 +174,12 @@ end
 
 # --- update_file ---
 
-function tool_update_file(state::AppState, args::Dict{String,Any})
+function tool_update_file(state::AppState, args::Dict{String,Any}; client=nothing)
     haskey(args, "path") && args["path"] !== nothing ||
         return tool_result_error("Missing required argument(s) for julia_update_file: path")
 
     path = args["path"]::String
-    workspace = resolve_workspace(state, args)
+    workspace = resolve_workspace(state, args; client)
     jw = workspace.workspace
     jw === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
 
@@ -188,8 +195,8 @@ end
 
 # --- get_diagnostics ---
 
-function tool_get_diagnostics(state::AppState, args::Dict{String,Any})
-    workspace = resolve_workspace(state, args)
+function tool_get_diagnostics(state::AppState, args::Dict{String,Any}; client=nothing)
+    workspace = resolve_workspace(state, args; client)
     jw = workspace.workspace
     jw === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
 
@@ -218,8 +225,8 @@ function tool_get_diagnostics(state::AppState, args::Dict{String,Any})
 end
 # --- format_file ---
 
-function tool_format_file(state::AppState, args::Dict{String,Any})
-    workspace = resolve_workspace(state, args)
+function tool_format_file(state::AppState, args::Dict{String,Any}; client=nothing)
+    workspace = resolve_workspace(state, args; client)
     jw = workspace.workspace
     jw === nothing && return tool_result_error("Workspace not configured. Call julia_set_workspace_folders first.")
 
@@ -282,8 +289,8 @@ end
 
 # --- list_testitems ---
 
-function tool_list_testitems(state::AppState, args::Dict{String,Any})
-    workspace = resolve_workspace(state, args)
+function tool_list_testitems(state::AppState, args::Dict{String,Any}; client=nothing)
+    workspace = resolve_workspace(state, args; client)
     filter = build_filter(args)
     items = collect_testitems_list(state; workspace=workspace, filter=filter)
 
@@ -291,8 +298,9 @@ function tool_list_testitems(state::AppState, args::Dict{String,Any})
 end
 # --- run_testitems ---
 
-function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_token=nothing, progress_sink=nothing)
-    workspace = resolve_workspace(state, args)
+function tool_run_testitems(state::AppState, args::Dict{String,Any};
+    client=nothing, request=nothing, progress_token=nothing, progress_sink=nothing)
+    workspace = resolve_workspace(state, args; client)
 
     max_wait = something(get(args, "max_wait_seconds", nothing), MAX_WAIT_SECONDS_DEFAULT)
     (max_wait isa Real && !(max_wait isa Bool) && isfinite(max_wait) && max_wait >= 0) ||
@@ -357,6 +365,15 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
         end
         mcp_error(state, "tools", "Test run $testrun_id failed to start: $e")
         return tool_result_error("Test run failed: $e")
+    end
+
+    # The client can cancel the request before the run starts. Then cancel the run now.
+    if request !== nothing
+        cancelled = lock(state.lock) do
+            request.testrun_id = testrun_id
+            request.cancelled
+        end
+        cancelled && tool_cancel_testrun(state, Dict{String,Any}("testrun_id" => testrun_id))
     end
 
     if timedwait(() -> istaskdone(run), max_wait; pollint=0.1) === :ok
@@ -496,7 +513,7 @@ end
 
 # --- rerun_failed ---
 
-function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_token=nothing, progress_sink=nothing)
+function tool_rerun_failed(state::AppState, args::Dict{String,Any}; request=nothing, progress_token=nothing, progress_sink=nothing)
     testrun_id = args["testrun_id"]::String
     workspace = haskey(args, "workspace_id") ?
         resolve_workspace(state, args) :
@@ -522,7 +539,7 @@ function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_tok
         end
     end
 
-    return tool_run_testitems(state, new_args; progress_token, progress_sink)
+    return tool_run_testitems(state, new_args; request, progress_token, progress_sink)
 end
 
 # --- cancel_testrun ---
@@ -550,6 +567,20 @@ function tool_cancel_testrun(state::AppState, args::Dict{String,Any})
 
     mcp_info(state, "tools", "Cancelled test run $testrun_id")
     return tool_result_text("Test run $testrun_id cancelled. Results collected so far stay available via julia_get_testrun_results.")
+end
+
+"""
+Mark `request` as cancelled. When it started a test run, cancel the run as
+`julia_cancel_testrun` does. A request with no test run yet cancels its run when the run
+starts.
+"""
+function cancel_request!(state::AppState, request::OpenRequest)
+    testrun_id = lock(state.lock) do
+        request.cancelled = true
+        request.testrun_id
+    end
+    testrun_id === nothing || tool_cancel_testrun(state, Dict{String,Any}("testrun_id" => testrun_id))
+    return
 end
 
 function tool_get_testrun_results(state::AppState, args::Dict{String,Any})
@@ -663,8 +694,8 @@ end
 
 # --- list_testruns ---
 
-function tool_list_testruns(state::AppState, args::Dict{String,Any})
-    workspace = resolve_workspace(state, args)
+function tool_list_testruns(state::AppState, args::Dict{String,Any}; client=nothing)
+    workspace = resolve_workspace(state, args; client)
     runs = lock(state.lock) do
         [run_summary(run) for run in values(workspace.runs)]
     end
@@ -673,8 +704,8 @@ end
 
 # --- list_test_processes ---
 
-function tool_list_test_processes(state::AppState, args::Dict{String,Any})
-    workspace = resolve_workspace(state, args)
+function tool_list_test_processes(state::AppState, args::Dict{String,Any}; client=nothing)
+    workspace = resolve_workspace(state, args; client)
     procs = [
         Dict{String,Any}(
             "id" => p.id,
@@ -718,8 +749,8 @@ function tool_get_process_output(state::AppState, args::Dict{String,Any})
     return tool_result_text(text)
 end
 
-function tool_terminate_all_processes(state::AppState, args::Dict{String,Any})
-    workspace = resolve_workspace(state, args)
+function tool_terminate_all_processes(state::AppState, args::Dict{String,Any}; client=nothing)
+    workspace = resolve_workspace(state, args; client)
     count = with_workspace_lock(workspace) do
         session = workspace.session
         session === nothing && return 0
@@ -824,7 +855,7 @@ end
 
 const PROFILE_ENTRIES_DEFAULT = 25
 
-function tool_create_session(state::AppState, args::Dict{String,Any})
+function tool_create_session(state::AppState, args::Dict{String,Any}; client=nothing)
     init_session_controller!(state)
 
     env = try
@@ -839,7 +870,7 @@ function tool_create_session(state::AppState, args::Dict{String,Any})
         return tool_result_error("Failed to create session: $(sprint(showerror, err))")
     end
 
-    rec = SessionRecord(session_id, env)
+    rec = SessionRecord(session_id, env, client === nothing ? nothing : client.id)
     lock(state.lock) do
         state.sessions[session_id] = rec
     end

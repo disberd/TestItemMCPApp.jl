@@ -102,9 +102,14 @@ not `localhost:<port>` or `127.0.0.1:<port>`, and when the `Origin` header names
 on another host.
 
 The answer to `tools/call` is an event stream: first the progress notifications of the
-call, then the response. When the stream has no other output for 60 seconds, the server
-sends the comment `: keepalive`. A GET request opens the event stream of the client for
-the resource notifications.
+call, then the response. When the stream has no other output for 1 second, the server
+sends the comment `: keepalive`. A write to a closed connection fails, so the server sees
+within about 2 seconds that the client closed the request. Then the server cancels the
+test run that the call started, as `julia_cancel_testrun` does. `notifications/cancelled`
+from the same client, with the id of that request, also cancels the run.
+
+A GET request opens the event stream of the client for the resource notifications. This
+stream gets `: keepalive` after 60 seconds with no other output.
 
 For [omp](https://github.com/can1357/oh-my-pi), put this entry in `mcp.json`:
 
@@ -124,8 +129,9 @@ For [omp](https://github.com/can1357/oh-my-pi), put this entry in `mcp.json`:
 ```
 
 omp runs a header value that starts with `!` as a shell command and sends its output.
-The `timeout` is in milliseconds. It must be longer than the longest tool call:
-`julia_run_testitems` waits up to 600 seconds by default.
+The `timeout` is in milliseconds. Keep it above `max_wait_seconds` of `julia_run_testitems`
+(600 seconds by default). When the omp timeout comes first, omp closes the request, and the
+server cancels the test run of the request.
 
 The same server runs on Windows. `julia_interrupt_session` cannot stop code that never
 yields, especially on Windows; `julia_kill_session` can.
@@ -233,7 +239,10 @@ A workspace tool finds its workspace with these rules:
   error that lists the workspaces.
 - Without a `workspace_id`, a tool that takes a `testrun_id` or a `process_id` finds the
   workspace from that id.
-- Without a `workspace_id`, any other tool uses the only workspace. When there are two or more
+- Without a `workspace_id`, any other tool uses the workspace that the client set up last
+  with `julia_set_workspace_folders`. When the server closed that workspace, the tool gives
+  an error that tells you to call `julia_set_workspace_folders` again.
+- A client that set up no workspace uses the only workspace. When there are two or more
   workspaces, the tool gives an error that lists each `workspace_id` with its folders. When
   there is no workspace, the error tells you to call `julia_set_workspace_folders`.
 
@@ -246,6 +255,13 @@ The server closes each workspace and kills each session that no client used for
 server keeps a workspace with a running test run, and a session with a queued or running
 request. `julia_close_workspace` closes a workspace at once. It refuses while a test run of
 the workspace is active.
+
+The server records the client that created each session. `DELETE` of a client kills its
+sessions. Over stdio, the end of the input kills them. `julia_list_sessions` lists the
+sessions of all clients. The server also removes an HTTP client that had no open request
+for `JULIAMCP_IDLE_TIMEOUT_SECS` seconds, with the same effect as `DELETE`. The next
+request of that client gets 404, and the client then sends `initialize` again to get a new
+`Mcp-Session-Id`.
 
 Over stdio, each `juliamcp` process has one client. To connect several clients to one
 process, use the [HTTP transport](#http-transport).

@@ -1,4 +1,4 @@
-# reaper.jl: close the workspaces and kill the sessions that no client uses
+# reaper.jl: close the idle workspaces, kill the idle sessions, and remove the idle clients
 
 const IDLE_TIMEOUT_SECS_DEFAULT = 3600
 
@@ -53,12 +53,54 @@ function close_workspace!(state::AppState, id::AbstractString; force::Bool=false
 end
 
 """
+Remove the client `id` from `state`, end its GET stream and kill the sessions that it
+created. This is the effect of `DELETE`. When `idle_before` is a time, keep a client that
+has an open request, or whose last request ended at that time or later.
+
+Return whether this call removed the client.
+"""
+function remove_client!(state::AppState, id::AbstractString; idle_before=nothing)
+    removed = lock(state.lock) do
+        client = get(state.clients, id, nothing)
+        client === nothing && return nothing
+        idle_before === nothing ||
+            (client.last_used_at < idle_before && isempty(client.requests)) ||
+            return nothing
+        delete!(state.clients, id)
+        sessions = [session_id for (session_id, rec) in state.sessions if rec.client_id == id]
+        foreach(session_id -> delete!(state.sessions, session_id), sessions)
+        (; outbox = client.outbox, sessions)
+    end
+    removed === nothing && return false
+    removed.outbox isa Outbox && close(removed.outbox)
+    for session_id in removed.sessions
+        JSC.terminate_session(state.session_controller, session_id)
+        mcp_info(state, "session", "Killed session $session_id of client $id")
+    end
+    isempty(removed.sessions) || notify_resource_list_changed(state)
+    return true
+end
+
+"""
 Close each workspace and kill each session that no client used in the last
 `timeout_secs` seconds. Keep a workspace while it has an active test run. Keep a session
 while it has a queued or running request.
+
+When `clients` is true, also remove each client that had no open request in the last
+`timeout_secs` seconds, as [`remove_client!`](@ref) does.
 """
-function reap_idle!(state::AppState, timeout_secs::Integer)
+function reap_idle!(state::AppState, timeout_secs::Integer; clients::Bool=false)
     limit = Dates.now() - Dates.Second(timeout_secs)
+
+    if clients
+        client_ids = lock(state.lock) do
+            [id for (id, client) in state.clients if client.last_used_at < limit]
+        end
+        for id in client_ids
+            remove_client!(state, id; idle_before=limit) &&
+                mcp_info(state, "reaper", "Removed idle client $id")
+        end
+    end
 
     workspace_ids = lock(state.lock) do
         [id for (id, workspace) in state.workspaces if workspace.last_used_at < limit]
@@ -89,11 +131,11 @@ function reap_idle!(state::AppState, timeout_secs::Integer)
 end
 
 """
-Start the task that calls [`reap_idle!`](@ref) every `max(1, timeout_secs ÷ 4)` seconds.
-Return `nothing` when `timeout_secs` is zero, because zero turns the reaper off. To stop
-the reaper, close its `timer` and then wait for its `task`.
+Start the task that calls [`reap_idle!`](@ref) every `max(1, timeout_secs ÷ 4)` seconds,
+with `clients`. Return `nothing` when `timeout_secs` is zero, because zero turns the reaper
+off. To stop the reaper, close its `timer` and then wait for its `task`.
 """
-function start_reaper(state::AppState, timeout_secs::Integer)
+function start_reaper(state::AppState, timeout_secs::Integer; clients::Bool=false)
     timeout_secs > 0 || return nothing
     interval = max(1, timeout_secs ÷ 4)
     timer = Timer(interval; interval)
@@ -105,7 +147,7 @@ function start_reaper(state::AppState, timeout_secs::Integer)
         end
         isopen(timer) || break
         try
-            reap_idle!(state, timeout_secs)
+            reap_idle!(state, timeout_secs; clients)
         catch err
             @error "Idle reaper failed" exception = (err, catch_backtrace())
         end

@@ -52,10 +52,13 @@ end
 """
 A Julia session managed by JuliaSessionControllers, plus the output the app has seen for
 it. `request_outputs` is keyed by the request id the caller supplied to `JSC.evaluate`.
+`client_id` is the id of the client that created the session, or `nothing` when no client
+did.
 """
 mutable struct SessionRecord
     const id::String
     const env::JSC.SessionEnvironment
+    const client_id::Union{Nothing,String}
     status::String
     const created_at::Dates.DateTime
     last_used_at::Dates.DateTime
@@ -65,10 +68,10 @@ mutable struct SessionRecord
     exit_message::Union{Nothing,String}
 end
 
-function SessionRecord(id::AbstractString, env::JSC.SessionEnvironment)
+function SessionRecord(id::AbstractString, env::JSC.SessionEnvironment, client_id=nothing)
     now = Dates.now()
     return SessionRecord(
-        String(id), env, "Created", now, now,
+        String(id), env, client_id, "Created", now, now,
         String[], Dict{String,Vector{String}}(), true, nothing,
     )
 end
