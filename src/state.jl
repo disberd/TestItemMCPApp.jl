@@ -36,9 +36,22 @@ function Workspace(folders::Vector{String}=String[])
     )
 end
 
+"""
+One MCP connection: the stdio connection, or one `Mcp-Session-Id` over HTTP.
+
+`outbox` gets the notifications that no request caused, such as
+`notifications/resources/updated`. Over stdio it is the JSON-RPC endpoint. Over HTTP it is
+the `Channel` of the GET stream of the client, or `nothing` while the client has no GET
+stream. `AppState.lock` guards `outbox` and `subscriptions`.
+"""
+mutable struct Client
+    const id::String
+    const subscriptions::Set{String}
+    outbox::Any
+end
+
 mutable struct AppState
-    endpoint::JSONRPC.JSONRPCEndpoint
-    subscriptions::Set{String}
+    clients::Dict{String,Client}
     log_level::Symbol  # MCP log level: :debug, :info, :notice, :warning, :error, :critical, :alert, :emergency
     session_controller::Union{Nothing,JSC.JuliaSessionController}
     session_reactor_task::Union{Nothing,Task}
@@ -47,10 +60,9 @@ mutable struct AppState
     lock::ReentrantLock
 end
 
-function AppState(endpoint::JSONRPC.JSONRPCEndpoint)
+function AppState()
     return AppState(
-        endpoint,
-        Set{String}(),
+        Dict{String,Client}(),
         :info,
         nothing,
         nothing,
@@ -58,6 +70,17 @@ function AppState(endpoint::JSONRPC.JSONRPCEndpoint)
         Dict{String,Workspace}(),
         ReentrantLock(),
     )
+end
+
+"""
+Add a new client with a random id to `state` and return it.
+"""
+function add_client!(state::AppState, outbox=nothing)
+    client = Client(string(UUIDs.uuid4()), Set{String}(), outbox)
+    lock(state.lock) do
+        state.clients[client.id] = client
+    end
+    return client
 end
 
 """

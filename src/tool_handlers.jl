@@ -28,7 +28,7 @@ function validate_tool_arguments(tool_name::String, arguments::Dict{String,Any})
     return tool_result_error("Missing required argument(s) for $tool_name: $(join(missing_args, ", "))")
 end
 
-function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{String,Any}; progress_token=nothing)
+function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{String,Any}; progress_token=nothing, progress_sink=nothing)
     invalid = validate_tool_arguments(tool_name, arguments)
     invalid === nothing || return invalid
 
@@ -46,9 +46,9 @@ function handle_tool_call(state::AppState, tool_name::String, arguments::Dict{St
         elseif tool_name == "julia_list_testitems"
             return tool_list_testitems(state, arguments)
         elseif tool_name == "julia_run_testitems"
-            return tool_run_testitems(state, arguments; progress_token=progress_token)
+            return tool_run_testitems(state, arguments; progress_token, progress_sink)
         elseif tool_name == "julia_rerun_failed"
-            return tool_rerun_failed(state, arguments; progress_token=progress_token)
+            return tool_rerun_failed(state, arguments; progress_token, progress_sink)
         elseif tool_name == "julia_cancel_testrun"
             return tool_cancel_testrun(state, arguments)
         elseif tool_name == "julia_get_testrun_results"
@@ -291,7 +291,7 @@ function tool_list_testitems(state::AppState, args::Dict{String,Any})
 end
 # --- run_testitems ---
 
-function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_token=nothing)
+function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_token=nothing, progress_sink=nothing)
     workspace = resolve_workspace(state, args)
 
     max_wait = something(get(args, "max_wait_seconds", nothing), MAX_WAIT_SECONDS_DEFAULT)
@@ -330,8 +330,9 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
     notify_resource_list_changed(state)
 
     run_record.progress_token = progress_token
+    run_record.progress_sink = progress_sink
     if progress_token !== nothing
-        notify_progress(state, progress_token, 0, length(items), "$(length(items)) test item(s) — starting")
+        notify_progress(progress_sink, progress_token, 0, length(items), "$(length(items)) test item(s) — starting")
         run_record.progress_value = 0.0
         start_heartbeat!(state, run_record)
     end
@@ -367,6 +368,7 @@ function tool_run_testitems(state::AppState, args::Dict{String,Any}; progress_to
     stop_heartbeat!(run_record)
     lock(state.lock) do
         run_record.progress_token = nothing
+        run_record.progress_sink = nothing
     end
     mcp_warn(state, "tools", "Test run $testrun_id still running after $(max_wait)s; returning early, the run continues")
 
@@ -427,6 +429,7 @@ function finish_run!(
 
     report_progress!(state, run_record; final=true)
     run_record.progress_token = nothing
+    run_record.progress_sink = nothing
 
     notify_resource_updated(state, "testrun://$testrun_id/summary")
     notify_resource_updated(state, "testrun://$testrun_id/failures")
@@ -493,7 +496,7 @@ end
 
 # --- rerun_failed ---
 
-function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_token=nothing)
+function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_token=nothing, progress_sink=nothing)
     testrun_id = args["testrun_id"]::String
     workspace = haskey(args, "workspace_id") ?
         resolve_workspace(state, args) :
@@ -519,7 +522,7 @@ function tool_rerun_failed(state::AppState, args::Dict{String,Any}; progress_tok
         end
     end
 
-    return tool_run_testitems(state, new_args; progress_token=progress_token)
+    return tool_run_testitems(state, new_args; progress_token, progress_sink)
 end
 
 # --- cancel_testrun ---

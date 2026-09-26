@@ -34,6 +34,7 @@ mutable struct TestRunRecord
     completed_at::Union{Nothing,Dates.DateTime}
     # --- MCP progress reporting, all guarded by `AppState.lock` ---
     progress_token::Union{Nothing,String,Int}
+    progress_sink::Any       # where progress goes: the sink of the request that started the run
     progress_value::Float64  # last value actually sent; -1 means nothing sent yet
     progress_frac::Float64   # sub-item heartbeat offset, in [0, 0.95)
     progress_done::Int
@@ -44,7 +45,7 @@ end
 function TestRunRecord(id, status, profile_params, items, coverage, started_at, completed_at)
     return TestRunRecord(
         id, status, profile_params, items, coverage, started_at, completed_at,
-        nothing, -1.0, 0.0, 0, "", nothing,
+        nothing, nothing, -1.0, 0.0, 0, "", nothing,
     )
 end
 

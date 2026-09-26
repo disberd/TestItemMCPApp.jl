@@ -102,17 +102,18 @@ end
     using JuliaMCP: notify_resource_updated
 
     MCPTestHelpers.with_app_state() do state
-        @test isempty(state.subscriptions)
+        client = JuliaMCP.add_client!(state)
+        @test isempty(client.subscriptions)
 
         uri = "workspace://0123456789abcdef/testitems"
-        JuliaMCP.handle_resources_subscribe(state, Dict("uri" => uri))
-        @test uri in state.subscriptions
+        JuliaMCP.handle_resources_subscribe(state, client, Dict("uri" => uri))
+        @test uri in client.subscriptions
 
-        JuliaMCP.handle_resources_unsubscribe(state, Dict("uri" => uri))
-        @test !(uri in state.subscriptions)
+        JuliaMCP.handle_resources_unsubscribe(state, client, Dict("uri" => uri))
+        @test !(uri in client.subscriptions)
 
         # Unsubscribing something that was never subscribed must not throw.
-        JuliaMCP.handle_resources_unsubscribe(state, Dict("uri" => uri))
+        JuliaMCP.handle_resources_unsubscribe(state, client, Dict("uri" => uri))
         # Notifying an unsubscribed URI is a no-op rather than an error.
         notify_resource_updated(state, uri)
     end
