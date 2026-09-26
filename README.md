@@ -39,6 +39,7 @@ The fork adds these changes to upstream:
 | `max_workers = 1` as the default for a test run, to keep the load low when several clients share the server. Upstream uses `min(Sys.CPU_THREADS, 8)`. | [`5cfe129`](https://github.com/disberd/TestItemMCPApp.jl/commit/5cfe129c479057b29a7def136e73fa776ef0b8ab) |
 | `julia_get_diagnostics` with `path` obeys `wait_for_ready`. The fork also proposes this fix upstream. | [`73da529`](https://github.com/disberd/TestItemMCPApp.jl/commit/73da52949562e5a8851102ac152f9e8ddb189c1f) |
 | An MCP Streamable HTTP transport: `juliamcp --http` serves several clients from one process. Each client has its own `Mcp-Session-Id`, resource subscriptions, and progress notifications. A bearer token protects the port. See [HTTP transport](#http-transport). | [`7d7ebc6`](https://github.com/disberd/TestItemMCPApp.jl/commit/7d7ebc6dc3f9d44d5dba2226b36bac5d299f6415) |
+| Client-scoped behaviour over HTTP: a tool call without a `workspace_id` uses the workspace that its client set up last. A closed request, or `notifications/cancelled`, cancels the test run of the request. `DELETE` kills the sessions of the client, and the reaper removes idle clients. See [Several clients, one server](#several-clients-one-server). | [`482c60d`](https://github.com/disberd/TestItemMCPApp.jl/commit/482c60d5c7cc8ce2276d0170a3b07e6e8395a090) |
 
 Fork pull requests #1 to #5 targeted the code before JuliaMCP, when the package was `TestItemMCPApp` and the app was `juliatimcp`.
 
