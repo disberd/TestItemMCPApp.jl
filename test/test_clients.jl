@@ -136,6 +136,30 @@ end
     end
 end
 
+@testitem "a cancel after the response leaves a test run that returned early running" setup=[MCPTestHelpers] tags=[:e2e] begin
+    using .MCPTestHelpers
+    using JuliaMCP: JSONRPC
+
+    MCPTestHelpers.with_app_state() do state
+        workspace = MCPTestHelpers.add_workspace!(state, [joinpath(MCPTestHelpers.TESTDATA_DIR, "HangPkg")])
+        client = JuliaMCP.add_client!(state)
+        msg = JSONRPC.Request("tools/call", Dict{String,Any}("name" => "julia_run_testitems",
+            "arguments" => Dict{String,Any}("name_pattern" => "^hangs", "max_wait_seconds" => 0)), 3, nothing)
+        request = JuliaMCP.open_request!(state, client, msg)
+        JuliaMCP.dispatch_mcp_message(state, client, JuliaMCP.Outbox(Inf), msg; request)
+        status() = lock(() -> only(values(workspace.runs)).status, state.lock)
+        @test status() === :running  # The call returned, and its run goes on.
+
+        # A client that closes the connection after the response, or that sends a late
+        # notifications/cancelled, does not stop the run.
+        @test JuliaMCP.cancel_request!(state, request) === false
+        @test status() === :running
+
+        JuliaMCP.tool_cancel_testrun(state, Dict{String,Any}("testrun_id" => only(keys(workspace.runs))))
+        @test status() === :cancelled
+    end
+end
+
 @testitem "DELETE kills the sessions of that client only" setup=[HTTPTestHelpers] begin
     using .HTTPTestHelpers: with_http_server, post, tool_call, initialize, headers, tool_json, wait_until, HTTP
 

@@ -320,9 +320,9 @@ function handle_post(state::AppState, inbox::Channel, http::HTTP.Stream, request
         seen_close = Threads.Atomic{Bool}(false)
         function client_closed()
             Threads.atomic_xchg!(seen_close, true) && return
-            cancel_request!(state, pending)
+            cancelled = cancel_request!(state, pending)
             close(outbox)  # Drop the messages that come later.
-            mcp_info(state, "transport", "Client $(client.id) closed request $(msg.id) before the response")
+            cancelled && mcp_info(state, "transport", "Client $(client.id) closed request $(msg.id) before the response")
         end
         watcher = watch_close(client_closed, http)
         try

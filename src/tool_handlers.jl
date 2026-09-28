@@ -570,17 +570,19 @@ function tool_cancel_testrun(state::AppState, args::Dict{String,Any})
 end
 
 """
-Mark `request` as cancelled. When it started a test run, cancel the run as
-`julia_cancel_testrun` does. A request with no test run yet cancels its run when the run
-starts.
+Mark `request` as cancelled, unless it has its response ([`answer_request!`](@ref)). When it
+started a test run, cancel the run as `julia_cancel_testrun` does. A request with no test
+run yet cancels its run when the run starts. Return `false` when the request has its
+response, else `true`.
 """
 function cancel_request!(state::AppState, request::OpenRequest)
-    testrun_id = lock(state.lock) do
+    cancelled, testrun_id = lock(state.lock) do
+        request.answered && return (false, nothing)
         request.cancelled = true
-        request.testrun_id
+        (true, request.testrun_id)
     end
     testrun_id === nothing || tool_cancel_testrun(state, Dict{String,Any}("testrun_id" => testrun_id))
-    return
+    return cancelled
 end
 
 function tool_get_testrun_results(state::AppState, args::Dict{String,Any})

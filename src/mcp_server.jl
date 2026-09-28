@@ -117,9 +117,8 @@ function dispatch_mcp_message(state::AppState, client::Client, sink, msg::JSONRP
         cancelled = lock(state.lock) do
             get(client.requests, id, nothing)
         end
-        if cancelled !== nothing
+        if cancelled !== nothing && cancel_request!(state, cancelled)
             mcp_info(state, "transport", "Client $(client.id) cancelled request $id")
-            cancel_request!(state, cancelled)
         end
         return
     end
@@ -146,6 +145,9 @@ function dispatch_mcp_message(state::AppState, client::Client, sink, msg::JSONRP
         end
         result = handle_tool_call(state, tool_name, arguments;
             client, request, progress_token=progress_token_of(params), progress_sink=sink)
+        # A test run that returned early continues after the response, so a cancel that
+        # comes later must not stop it.
+        request === nothing || answer_request!(state, request)
         send_result(sink, msg, result)
         return
     end

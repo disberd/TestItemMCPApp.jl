@@ -37,15 +37,18 @@ function Workspace(folders::Vector{String}=String[])
 end
 
 """
-A request that a client sent and that has no response yet.
+A request that a client sent, until the handler of the request ends.
 
 `cancelled` becomes true when the client closes the request or sends
 `notifications/cancelled` for it. `testrun_id` is the test run that the request started.
-`AppState.lock` guards both.
+`answered` becomes true just before the response of a `tools/call` goes to the transport.
+From then on, a cancel does nothing, so a test run that returned early continues.
+`AppState.lock` guards these fields.
 """
 mutable struct OpenRequest
     const id::Union{String,Int}
     cancelled::Bool
+    answered::Bool
     testrun_id::Union{Nothing,String}
 end
 
@@ -112,11 +115,23 @@ response.
 """
 function open_request!(state::AppState, client::Client, msg::JSONRPC.Request)
     msg.id === nothing && return nothing
-    request = OpenRequest(msg.id, false, nothing)
+    request = OpenRequest(msg.id, false, false, nothing)
     lock(state.lock) do
         client.requests[msg.id] = request
     end
     return request
+end
+
+"""
+Mark `request` as answered. Call this before the response goes to the transport: the
+client can close the connection as soon as it has the response, and from then on
+[`cancel_request!`](@ref) must do nothing.
+"""
+function answer_request!(state::AppState, request::OpenRequest)
+    lock(state.lock) do
+        request.answered = true
+    end
+    return
 end
 
 function close_request!(state::AppState, client::Client, request::OpenRequest)
