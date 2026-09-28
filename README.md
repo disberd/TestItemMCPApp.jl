@@ -103,10 +103,10 @@ on another host.
 
 The answer to `tools/call` is an event stream: first the progress notifications of the
 call, then the response. When the stream has no other output for 1 second, the server
-sends the comment `: keepalive`. A write to a closed connection fails, so the server sees
-within about 2 seconds that the client closed the request. Then the server cancels the
-test run that the call started, as `julia_cancel_testrun` does. `notifications/cancelled`
-from the same client, with the id of that request, also cancels the run.
+sends the comment `: keepalive`. The server sees at once when the client closes the
+connection of the call, also while the server is busy. Then the server cancels the test
+run that the call started, as `julia_cancel_testrun` does. `notifications/cancelled` from
+the same client, with the id of that request, also cancels the run.
 
 A GET request opens the event stream of the client for the resource notifications. This
 stream gets `: keepalive` after 60 seconds with no other output.

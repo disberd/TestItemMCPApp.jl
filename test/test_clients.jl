@@ -40,23 +40,31 @@ end
         a = initialize(server)
         b = initialize(server)
         set_up(server, a, "HangPkg")
-        hang = Dict{String,Any}("name_pattern" => "^hangs", "max_wait_seconds" => 3600)
+        hang = Dict{String,Any}("name_pattern" => "^hangs", "max_wait_seconds" => 300)
         listed(run) = only(s for s in tool_json(post(server, tool_call(90, "julia_list_testruns"); session=b))
             if s["testrun_id"] == run)
+        # When the request of `session` knows its test run, a cancel ends that run at once.
+        started(session) = lock(server.state.lock) do
+            request = get(server.state.clients[session].requests, 3, nothing)
+            request !== nothing && request.testrun_id !== nothing
+        end
 
         socket = raw_post(server, tool_call(3, "julia_run_testitems", hang); session=a)
-        @test wait_until(() -> length(testruns(server, b)) == 1, 60)
+        @test wait_until(() -> started(a), 120)
         a_run = only(keys(testruns(server, b)))
         b_call = @async post(server, tool_call(3, "julia_run_testitems", hang); session=b)
-        @test wait_until(() -> length(testruns(server, b)) == 2, 60)
+        @test wait_until(() -> started(b), 120)
         b_run = only(setdiff(keys(testruns(server, b)), [a_run]))
-        # Close the POST when both test items run. While a test process starts, this process
-        # is busy, and Julia fires timers, such as the keepalive of the stream, only when
-        # thread 1 is free. The first start of a test process can take minutes on CI.
-        @test wait_until(() -> listed(a_run)["running"] == listed(b_run)["running"] == 1, 1800; interval=0.5)
 
         closed_at = now()
         close(socket)
+        # Keep thread 1 busy for 4 s, as the start of a test process can. Julia fires timers,
+        # such as the keepalive of the stream, only on thread 1. Thus only the close watcher,
+        # on another thread, can see the close in this time.
+        busy_until = time() + 4
+        while time() < busy_until
+            GC.safepoint()  # Let a garbage collection that starts on another thread continue.
+        end
         @test wait_until(() -> listed(a_run)["status"] == "cancelled", 60)
         # Other work on thread 1 can delay the answer to a poll, so use the time of the cancel.
         @test DateTime(listed(a_run)["completed_at"]) - closed_at < Second(3)

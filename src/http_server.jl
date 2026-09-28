@@ -4,13 +4,11 @@ const HTTP_PORT_DEFAULT = 50020
 const MCP_PATH = "/mcp"
 # A GET stream with no other output for this many seconds gets a `: keepalive` comment.
 const SSE_KEEPALIVE_SECS = 60.0
-# A `tools/call` stream gets `: keepalive` after this many seconds of silence. HTTP.jl does
-# not tell a handler that the client closed the connection, but a write to a closed
-# connection fails. This write is how the server sees that the client closed the request.
-# After a reset from the client, the first write fails. After a FIN, the second write fails.
-# ponytail: Julia fires timers only when thread 1 is free, so work on thread 1 that does not
-# yield delays the keepalive and the cancel. A task that waits in `eof` on the Reseau
-# connection does not need thread 1, but it reads internal fields of HTTP.jl.
+# A `tools/call` stream gets `: keepalive` after this many seconds of silence. A write to a
+# closed connection fails, so this write also shows that the client closed the request.
+# After a reset from the client, the first write fails. After a graceful close (FIN), the
+# second write fails. This is the fallback for a request that `watch_close` cannot watch.
+# Julia fires the timer of this write only when thread 1 is free.
 const TOOL_CALL_KEEPALIVE_SECS = 1.0
 # The `Origin` of a page that this host serves. The server refuses all other origins.
 const LOCAL_ORIGIN = r"^http://(localhost|127\.0\.0\.1)(:\d+)?$"
@@ -225,6 +223,60 @@ function write_events(io::IO, outbox::Outbox; keepalive::Real=SSE_KEEPALIVE_SECS
     end
 end
 
+"""
+Start a task that calls `on_close()` when the client closes the connection of the HTTP/1
+request `http`. Return the task, or `nothing` for a request that the task cannot watch: an
+HTTP/2 stream shares its connection with other streams. Stop the task with
+[`stop_close_watcher`](@ref) before the handler returns.
+
+HTTP.jl does not tell a handler that the client closed the connection. The task waits in
+`eof` on the TCP connection, which looks at the next byte and leaves it for HTTP.jl. The
+poller thread of Reseau wakes the task, and the task runs on a thread of the default pool.
+Thus the server sees the close also while Julia thread 1 is busy and cannot fire timers.
+`on_close` runs on the thread of the task.
+"""
+function watch_close(on_close, http::HTTP.Stream)
+    # `h2_conn`, `tracked` and `conn` are internal fields of HTTP.jl 2.8.
+    http.h2_conn === nothing || return nothing
+    conn = http.tracked.conn
+    conn isa HTTP.TCP.Conn || return nothing
+    return Threads.@spawn :default begin
+        closed = try
+            eof(conn)  # `false`: the client sent more bytes, so it did not close.
+        catch err
+            # The deadline from `stop_close_watcher` stops the watch. Other errors, such as a
+            # reset from the client, show that the connection ended.
+            !(err isa HTTP.TCP.DeadlineExceededError)
+        end
+        closed && on_close()
+    end
+end
+
+"""
+Stop the task from [`watch_close`](@ref), and wait until it ends. Then HTTP.jl can read
+the next request from the connection.
+"""
+function stop_close_watcher(http::HTTP.Stream, watcher)
+    watcher === nothing && return
+    conn = http.tracked.conn
+    # A read deadline in the past wakes the task from `eof`. Then clear the deadline: HTTP.jl
+    # with no timeouts does not set one before it reads the next request.
+    istaskdone(watcher) || set_read_deadline(conn, time_ns())
+    wait(watcher)
+    set_read_deadline(conn, 0)
+    return
+end
+
+# Set the read deadline of `conn`, unless the connection closed.
+function set_read_deadline(conn, deadline_ns)
+    try
+        HTTP.TCP.set_read_deadline!(conn, deadline_ns)
+    catch
+        isopen(conn) && rethrow()
+    end
+    return
+end
+
 function handle_http(state::AppState, inbox::Channel, token::AbstractString, port::Integer, http::HTTP.Stream)
     request = HTTP.startread(http)
     # Read the body first: when the server closes a connection with unread request bytes, the
@@ -245,10 +297,10 @@ end
 
 """
 Answer a POST with one JSON-RPC message. A `tools/call` gets an SSE stream: first the
-notifications that the call causes, then the response. When a write to the stream fails,
-the client closed the request, and the server cancels the test run of the call. Other
-requests get the response as JSON. A notification, or a response from the client, gets 202
-and no body.
+notifications that the call causes, then the response. When the client closes the
+connection before the response, the server cancels the test run of the call: see
+[`watch_close`](@ref), and `TOOL_CALL_KEEPALIVE_SECS` for the fallback. Other requests get
+the response as JSON. A notification, or a response from the client, gets 202 and no body.
 """
 function handle_post(state::AppState, inbox::Channel, http::HTTP.Stream, request, body::String)
     msg = parse_message(body)
@@ -264,16 +316,23 @@ function handle_post(state::AppState, inbox::Channel, http::HTTP.Stream, request
     put!(inbox, (client, outbox, msg, pending))
     msg.id === nothing && return respond(http, 202)
     if msg.method == "tools/call"
+        # The watcher and a failed write can both see the close, on two threads. Act once.
+        seen_close = Threads.Atomic{Bool}(false)
+        function client_closed()
+            Threads.atomic_xchg!(seen_close, true) && return
+            cancel_request!(state, pending)
+            close(outbox)  # Drop the messages that come later.
+            mcp_info(state, "transport", "Client $(client.id) closed request $(msg.id) before the response")
+        end
+        watcher = watch_close(client_closed, http)
         try
             start_event_stream(http)
             write_events(http, outbox; keepalive=TOOL_CALL_KEEPALIVE_SECS)
         catch
-            mcp_info(state, "transport", "Client $(client.id) closed request $(msg.id) before the response")
-            cancel_request!(state, pending)
+            client_closed()
             rethrow()
         finally
-            # When the client went away, drop the messages that come later.
-            close(outbox)
+            stop_close_watcher(http, watcher)
         end
         return
     end
