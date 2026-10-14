@@ -219,7 +219,7 @@ function tool_definitions()
                     ),
                     "julia_cmd" => Dict{String,Any}(
                         "type" => "string",
-                        "description" => "Julia command to use (default: \"julia\").",
+                        "description" => "Julia executable to use, as one program name or path (default: \"julia\"). Put arguments, for example a juliaup channel such as \"+1.12\", in julia_args.",
                     ),
                     "julia_args" => Dict{String,Any}(
                         "type" => "array",
@@ -300,7 +300,7 @@ function tool_definitions()
                         "type" => "string",
                         "description" => "ID of the previous test run whose failures to re-run.",
                     ),
-                    "julia_cmd" => Dict{String,Any}("type" => "string", "description" => "Julia command override."),
+                    "julia_cmd" => Dict{String,Any}("type" => "string", "description" => "Julia executable override, as one program name or path. Put arguments in julia_args."),
                     "julia_args" => Dict{String,Any}("type" => "array", "items" => Dict{String,Any}("type" => "string"), "description" => "Julia args override."),
                     "max_workers" => Dict{String,Any}("type" => "integer", "description" => "Max workers override."),
                     "timeout" => Dict{String,Any}("type" => "number", "description" => "Per-item timeout override."),

@@ -46,7 +46,7 @@ From then on, a cancel does nothing, so a test run that returned early continues
 `AppState.lock` guards these fields.
 """
 mutable struct OpenRequest
-    const id::Union{String,Int}
+    const id::Union{String,Int64}
     cancelled::Bool
     answered::Bool
     testrun_id::Union{Nothing,String}
