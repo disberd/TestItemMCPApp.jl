@@ -120,7 +120,7 @@ end
         @test MCPTestHelpers.is_error(gone)
         @test occursin("Unknown workspace_id", MCPTestHelpers.result_text(gone))
 
-        # The other workspace stays open. It is now the only one, so it needs no id.
+        # The other workspace stays open. The client set it up last, so it needs no id.
         @test !MCPTestHelpers.is_error(MCPTestHelpers.call_tool(client, "julia_list_testitems",
             Dict{String,Any}("workspace_id" => lint_id)))
         @test MCPTestHelpers.result_json(MCPTestHelpers.call_tool(client, "julia_list_testitems")) == []

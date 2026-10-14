@@ -81,22 +81,47 @@ function handle_initialize(state::AppState, params::Dict)
     )
 end
 
+# A sink takes the JSON-RPC messages for one client or for one request. The JSON-RPC
+# endpoint of the stdio transport is a sink, and `http_server.jl` adds the `Channel` of an
+# HTTP response. `nothing` drops the messages.
+
+send_notification(::Nothing, method::String, params) = nothing
+
+function send_notification(endpoint::JSONRPC.JSONRPCEndpoint, method::String, params)
+    try
+        JSONRPC.send_notification(endpoint, method, params)
+    catch
+        # Endpoint may be closed
+    end
+    return
+end
+
+send_result(endpoint::JSONRPC.JSONRPCEndpoint, msg::JSONRPC.Request, result) =
+    JSONRPC.send_success_response(endpoint, msg, result)
+
+send_error(endpoint::JSONRPC.JSONRPCEndpoint, msg::JSONRPC.Request, code, message, data) =
+    JSONRPC.send_error_response(endpoint, msg, code, message, data)
+
+"""
+Send `notifications/resources/updated` for `uri` to each client that subscribed to `uri`.
+"""
 function notify_resource_updated(state::AppState, uri::String)
-    if uri in state.subscriptions
-        try
-            JSONRPC.send_notification(state.endpoint, "notifications/resources/updated", Dict{String,Any}(
-                "uri" => uri,
-            ))
-        catch
-        end
+    outboxes = lock(state.lock) do
+        [client.outbox for client in values(state.clients) if uri in client.subscriptions]
+    end
+    for outbox in outboxes
+        send_notification(outbox, "notifications/resources/updated", Dict{String,Any}("uri" => uri))
     end
 end
 
+"""
+Send `notifications/resources/list_changed` to every client.
+"""
 function notify_resource_list_changed(state::AppState)
-    try
-        JSONRPC.send_notification(state.endpoint, "notifications/resources/list_changed", nothing)
-    catch
+    outboxes = lock(state.lock) do
+        [client.outbox for client in values(state.clients)]
     end
+    foreach(outbox -> send_notification(outbox, "notifications/resources/list_changed", nothing), outboxes)
 end
 
 # --- Progress ---
@@ -106,17 +131,13 @@ const PROGRESS_HEARTBEAT_INTERVAL = 2.0
 # one finished.
 const PROGRESS_FRAC_CEILING = 0.95
 
-function notify_progress(state::AppState, token, progress::Real, total::Real, message::String)
-    try
-        JSONRPC.send_notification(state.endpoint, "notifications/progress", Dict{String,Any}(
-            "progressToken" => token,
-            "progress" => progress,
-            "total" => total,
-            "message" => message,
-        ))
-    catch
-        # Endpoint may be closed
-    end
+function notify_progress(sink, token, progress::Real, total::Real, message::String)
+    send_notification(sink, "notifications/progress", Dict{String,Any}(
+        "progressToken" => token,
+        "progress" => progress,
+        "total" => total,
+        "message" => message,
+    ))
 end
 
 function progress_message(run::TestRunRecord, done::Int, total::Int)
@@ -134,8 +155,8 @@ function progress_message(run::TestRunRecord, done::Int, total::Int)
 end
 
 """
-Send a `notifications/progress` for `run`, if the client asked for progress on the call
-that started it.
+Send a `notifications/progress` for `run` to the sink of the call that started it, if the
+client asked for progress on that call.
 
 Progress is reported as `done + frac`, where `done` counts finished test items and `frac`
 is a heartbeat offset within the current item. The spec requires the value to strictly
@@ -168,11 +189,12 @@ function report_progress!(state::AppState, run::TestRunRecord; heartbeat::Bool=f
         run.progress_value = value
 
         message = final ? final_progress_message(run, done, total) : progress_message(run, done, total)
-        return (value, total, message)
+        return (run.progress_sink, value, total, message)
     end
 
     payload === nothing && return
-    notify_progress(state, token, payload[1], payload[2], payload[3])
+    sink, value, total, message = payload
+    notify_progress(sink, token, value, total, message)
     return
 end
 

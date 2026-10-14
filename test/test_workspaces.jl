@@ -53,7 +53,7 @@ end
     end
 end
 
-@testitem "workspace id is optional with one workspace and required with many" setup=[MCPTestHelpers] begin
+@testitem "a call without a workspace id uses the workspace that the client set up last" setup=[MCPTestHelpers] begin
     using .MCPTestHelpers
 
     MCPTestHelpers.with_mcp_server() do client
@@ -68,17 +68,19 @@ end
 
         lint_id = MCPTestHelpers.workspace_id_from_result(MCPTestHelpers.call_tool(client,
             "julia_set_workspace_folders", Dict{String,Any}("folders" => [lint], "watch" => false)))
-        ambiguous = MCPTestHelpers.call_tool(client, "julia_list_testitems")
-        @test MCPTestHelpers.is_error(ambiguous)
-        message = MCPTestHelpers.result_text(ambiguous)
+        last_set_up = MCPTestHelpers.call_tool(client, "julia_list_testitems")
+        @test !MCPTestHelpers.is_error(last_set_up)
+        @test isempty(MCPTestHelpers.result_json(last_set_up))
+
+        unknown = MCPTestHelpers.call_tool(client, "julia_list_testitems",
+            Dict{String,Any}("workspace_id" => "missing"))
+        @test MCPTestHelpers.is_error(unknown)
+        message = MCPTestHelpers.result_text(unknown)
+        @test occursin("Unknown workspace_id", message)
         @test occursin(basic_id, message)
         @test occursin(lint_id, message)
         @test occursin(basic, message)
         @test occursin(lint, message)
-        unknown = MCPTestHelpers.call_tool(client, "julia_list_testitems",
-            Dict{String,Any}("workspace_id" => "missing"))
-        @test MCPTestHelpers.is_error(unknown)
-        @test occursin("Unknown workspace_id", MCPTestHelpers.result_text(unknown))
     end
 end
 

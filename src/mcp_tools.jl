@@ -24,7 +24,8 @@ function tool_definitions()
                              "each folder, resolves the Project.toml/Manifest.toml environments, and detects " *
                              "@testitem and @testsetup blocks. The workspace then keeps itself up to date as files " *
                              "change on disk, so nothing needs to be called after editing a file. Calling this " *
-                             "again rebuilds the workspace for those folders and keeps its run history. Julia sessions " *
+                             "again rebuilds the workspace for those folders and keeps its run history. Later " *
+                             "tool calls of this client without a workspace_id use this workspace. Julia sessions " *
                              "(julia_create_session) are separate and need no workspace.",
             "annotations" => tool_annotations("Set Julia workspace folders"; destructive=true, idempotent=true),
             "inputSchema" => Dict{String,Any}(
@@ -185,8 +186,9 @@ function tool_definitions()
                              "\"running\", or stop the run with julia_cancel_testrun. A hanging test item " *
                              "(deadlock, blocking take!, infinite loop) therefore cannot hang this call, but it " *
                              "never finishes on its own either: if you suspect one, cancel and rerun with a " *
-                             "`timeout` so that item is errored and the rest of the suite completes. If this " *
-                             "call is interrupted or its result is lost, the run keeps going and its results " *
+                             "`timeout` so that item is errored and the rest of the suite completes. When the " *
+                             "client cancels this call or closes its HTTP request, the server cancels the run. " *
+                             "If the result is lost in another way, the run keeps going. Either way its results " *
                              "stay retrievable — find the run with julia_list_testruns and fetch it with " *
                              "julia_get_testrun_results. Requires julia_set_workspace_folders.",
             "annotations" => tool_annotations("Run Julia test items"),
@@ -678,7 +680,8 @@ function tool_definitions()
     ])
     workspace_id_schema = Dict{String,Any}(
         "type" => "string",
-        "description" => "Workspace id from julia_set_workspace_folders. Optional when exactly one workspace exists.",
+        "description" => "Workspace id from julia_set_workspace_folders. Without it, the tool uses the workspace " *
+                         "that this client set up last, else the only workspace.",
     )
     for definition in definitions
         definition["name"] in workspace_tools ||

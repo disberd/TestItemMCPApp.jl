@@ -34,21 +34,11 @@ end
 # --- Bare AppState, no server loop -------------------------------------------
 
 """
-Run `f(state)` with a fresh `AppState` backed by a live endpoint whose output is
-discarded. Use for testing handlers directly without the MCP message loop.
+Run `f(state)` with a fresh `AppState` that has no client. Use for testing handlers
+directly without the MCP message loop.
 """
 function with_app_state(f)
-    server_io, client_io, listener = named_pipe_pair()
-    endpoint = JSONRPC.JSONRPCEndpoint(server_io, server_io; framing=JSONRPC.NewlineDelimitedFraming())
-    JSONRPC.start(endpoint)
-    # Discard anything the state writes so the pipe buffer never fills up.
-    drain = @async try
-        while !eof(client_io)
-            readavailable(client_io)
-        end
-    catch
-    end
-    state = JuliaMCP.AppState(endpoint)
+    state = JuliaMCP.AppState()
     try
         f(state)
     finally
@@ -58,11 +48,6 @@ function with_app_state(f)
             JuliaMCP.shutdown_sessions!(state)
         catch
         end
-        close(endpoint)
-        close(client_io)
-        close(server_io)
-        close(listener)
-        wait(drain)
     end
 end
 

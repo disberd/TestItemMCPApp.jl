@@ -34,6 +34,7 @@ mutable struct TestRunRecord
     completed_at::Union{Nothing,Dates.DateTime}
     # --- MCP progress reporting, all guarded by `AppState.lock` ---
     progress_token::Union{Nothing,String,Int}
+    progress_sink::Any       # where progress goes: the sink of the request that started the run
     progress_value::Float64  # last value actually sent; -1 means nothing sent yet
     progress_frac::Float64   # sub-item heartbeat offset, in [0, 0.95)
     progress_done::Int
@@ -44,17 +45,20 @@ end
 function TestRunRecord(id, status, profile_params, items, coverage, started_at, completed_at)
     return TestRunRecord(
         id, status, profile_params, items, coverage, started_at, completed_at,
-        nothing, -1.0, 0.0, 0, "", nothing,
+        nothing, nothing, -1.0, 0.0, 0, "", nothing,
     )
 end
 
 """
 A Julia session managed by JuliaSessionControllers, plus the output the app has seen for
 it. `request_outputs` is keyed by the request id the caller supplied to `JSC.evaluate`.
+`client_id` is the id of the client that created the session, or `nothing` when no client
+did.
 """
 mutable struct SessionRecord
     const id::String
     const env::JSC.SessionEnvironment
+    const client_id::Union{Nothing,String}
     status::String
     const created_at::Dates.DateTime
     last_used_at::Dates.DateTime
@@ -64,10 +68,10 @@ mutable struct SessionRecord
     exit_message::Union{Nothing,String}
 end
 
-function SessionRecord(id::AbstractString, env::JSC.SessionEnvironment)
+function SessionRecord(id::AbstractString, env::JSC.SessionEnvironment, client_id=nothing)
     now = Dates.now()
     return SessionRecord(
-        String(id), env, "Created", now, now,
+        String(id), env, client_id, "Created", now, now,
         String[], Dict{String,Vector{String}}(), true, nothing,
     )
 end

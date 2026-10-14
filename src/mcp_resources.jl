@@ -277,18 +277,18 @@ function read_resource(state::AppState, uri::String)
     throw(ResourceNotFound(uri, "Unknown resource URI: $uri"))
 end
 
-function handle_resources_subscribe(state::AppState, params::Dict)
+function handle_resources_subscribe(state::AppState, client::Client, params::Dict)
     uri = params["uri"]::String
     lock(state.lock) do
-        push!(state.subscriptions, uri)
+        push!(client.subscriptions, uri)
     end
     return Dict{String,Any}()
 end
 
-function handle_resources_unsubscribe(state::AppState, params::Dict)
+function handle_resources_unsubscribe(state::AppState, client::Client, params::Dict)
     uri = params["uri"]::String
     lock(state.lock) do
-        delete!(state.subscriptions, uri)
+        delete!(client.subscriptions, uri)
     end
     return Dict{String,Any}()
 end

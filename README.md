@@ -37,6 +37,8 @@ The fork adds these changes to upstream:
 | An idle reaper that closes unused workspaces and sessions, and the `julia_close_workspace` tool. | [`b649de8`](https://github.com/disberd/TestItemMCPApp.jl/commit/b649de8bf07bb879fa540b472f3edb08c66d47aa) |
 | Pass-through tools and arguments for TestItemRuns features: `julia_env` and `log_level` on test runs, `julia_get_process_output`, and `julia_terminate_all_processes`. | [`5cfe129`](https://github.com/disberd/TestItemMCPApp.jl/commit/5cfe129c479057b29a7def136e73fa776ef0b8ab) |
 | `julia_get_diagnostics` with `path` obeys `wait_for_ready`. The fork also proposes this fix upstream. | [`73da529`](https://github.com/disberd/TestItemMCPApp.jl/commit/73da52949562e5a8851102ac152f9e8ddb189c1f) |
+| An MCP Streamable HTTP transport: `juliamcp --http` serves several clients from one process. Each client has its own `Mcp-Session-Id`, resource subscriptions, and progress notifications. A bearer token protects the port. See [HTTP transport](#http-transport). | [`7d7ebc6`](https://github.com/disberd/TestItemMCPApp.jl/commit/7d7ebc6dc3f9d44d5dba2226b36bac5d299f6415) |
+| Client-scoped behaviour over HTTP: a tool call without a `workspace_id` uses the workspace that its client set up last. A closed request, or `notifications/cancelled`, cancels the test run of the request. `DELETE` kills the sessions of the client, and the reaper removes idle clients. See [Several clients, one server](#several-clients-one-server). | [`482c60d`](https://github.com/disberd/TestItemMCPApp.jl/commit/482c60d5c7cc8ce2276d0170a3b07e6e8395a090) |
 
 Fork pull requests #1 to #5 targeted the code before JuliaMCP, when the package was `TestItemMCPApp` and the app was `juliatimcp`.
 
@@ -70,6 +72,69 @@ Point an MCP client at the `juliamcp` command. For clients that use the common
 
 The server starts with no workspace loaded. An agent's first call is normally
 `julia_set_workspace_folders` to tell it which directories to analyse.
+
+### HTTP transport
+
+`juliamcp --http` serves
+[MCP Streamable HTTP](https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#streamable-http)
+at `http://127.0.0.1:50020/mcp`. Several clients can use one server process. Each client
+has its own `Mcp-Session-Id`, its own resource subscriptions, and the progress of its own
+calls.
+
+```sh
+juliamcp --http [--port N] [--token-file PATH]
+```
+
+- `--port N` sets the port. Without `--port`, the server uses the `JULIAMCP_PORT`
+  environment variable, and then `50020`. When another process uses the port, the server
+  stops with an error.
+- `--token-file PATH` sets the file with the bearer token. Without `--token-file`, the
+  server uses the `JULIAMCP_TOKEN_FILE` environment variable, and then `juliamcp/token` in
+  the first Julia depot (normally `~/.julia/juliamcp/token`).
+
+Each request must have the header `Authorization: Bearer <token>`, with the token from the
+token file. When the token file does not exist, the server writes a new random token to
+it. On POSIX, the new file gets mode 0600, and a new directory gets mode 0700. On Windows,
+the file has no POSIX modes.
+
+The server listens on `127.0.0.1` only. It refuses a request when the `Host` header is
+not `localhost:<port>` or `127.0.0.1:<port>`, and when the `Origin` header names a page
+on another host.
+
+The answer to `tools/call` is an event stream: first the progress notifications of the
+call, then the response. When the stream has no other output for 1 second, the server
+sends the comment `: keepalive`. The server sees at once when the client closes the
+connection of the call, also while the server is busy. Then the server cancels the test
+run that the call started, as `julia_cancel_testrun` does. `notifications/cancelled` from
+the same client, with the id of that request, also cancels the run.
+
+A GET request opens the event stream of the client for the resource notifications. This
+stream gets `: keepalive` after 60 seconds with no other output.
+
+For [omp](https://github.com/can1357/oh-my-pi), put this entry in `mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "juliamcp": {
+      "type": "http",
+      "url": "http://127.0.0.1:50020/mcp",
+      "timeout": 660000,
+      "headers": {
+        "Authorization": "!printf 'Bearer %s' \"$(cat ~/.julia/juliamcp/token)\""
+      }
+    }
+  }
+}
+```
+
+omp runs a header value that starts with `!` as a shell command and sends its output.
+The `timeout` is in milliseconds. Keep it above `max_wait_seconds` of `julia_run_testitems`
+(600 seconds by default). When the omp timeout comes first, omp closes the request, and the
+server cancels the test run of the request.
+
+The same server runs on Windows. `julia_interrupt_session` cannot stop code that never
+yields, especially on Windows; `julia_kill_session` can.
 
 ## What it exposes
 
@@ -173,11 +238,16 @@ A workspace tool finds its workspace with these rules:
   error that lists the workspaces.
 - Without a `workspace_id`, a tool that takes a `testrun_id` or a `process_id` finds the
   workspace from that id.
-- Without a `workspace_id`, any other tool uses the only workspace. When there are two or more
+- Without a `workspace_id`, any other tool uses the workspace that the client set up last
+  with `julia_set_workspace_folders`. When the server closed that workspace, the tool gives
+  an error that tells you to call `julia_set_workspace_folders` again.
+- A client that set up no workspace uses the only workspace. When there are two or more
   workspaces, the tool gives an error that lists each `workspace_id` with its folders. When
   there is no workspace, the error tells you to call `julia_set_workspace_folders`.
 
 The server sends resource notifications only for the workspace that changed.
+`notifications/resources/updated` goes only to the clients that subscribed to the resource,
+and the progress of a call goes only to the client that made the call.
 
 The server closes each workspace and kills each session that no client used for
 `JULIAMCP_IDLE_TIMEOUT_SECS` seconds. The default is `3600`, and `0` turns this off. The
@@ -185,10 +255,15 @@ server keeps a workspace with a running test run, and a session with a queued or
 request. `julia_close_workspace` closes a workspace at once. It refuses while a test run of
 the workspace is active.
 
-The server reads MCP messages from stdio, so each `juliamcp` process has one client. To
-connect several clients to one process, run it behind an MCP multiplexer such as
-[rmcp-mux](https://github.com/VetCoders/rmcp-mux). rmcp-mux rewrites request ids, keeps the
-response to `initialize`, and gives each client a stdio proxy.
+The server records the client that created each session. `DELETE` of a client kills its
+sessions. Over stdio, the end of the input kills them. `julia_list_sessions` lists the
+sessions of all clients. The server also removes an HTTP client that had no open request
+for `JULIAMCP_IDLE_TIMEOUT_SECS` seconds, with the same effect as `DELETE`. The next
+request of that client gets 404, and the client then sends `initialize` again to get a new
+`Mcp-Session-Id`.
+
+Over stdio, each `juliamcp` process has one client. To connect several clients to one
+process, use the [HTTP transport](#http-transport).
 
 ## Development
 
