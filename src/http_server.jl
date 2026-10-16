@@ -154,10 +154,8 @@ function parse_message(body::AbstractString)
     method = message["method"]
     params = get(message, "params", nothing)
     id = get(message, "id", nothing)
-    # JSON gives an integer as Int64, but `JSONRPC.Request` keeps an `Int`: Int32 on 32-bit Julia.
-    id isa Int64 && typemin(Int) <= id <= typemax(Int) && (id = Int(id))
     (method isa String && params isa Union{Nothing,Dict{String,Any},Vector{Any}} &&
-     id isa Union{Nothing,String,Int}) || return nothing
+     id isa Union{Nothing,String,Int64}) || return nothing
     return JSONRPC.Request(method, params, id, nothing)
 end
 
@@ -236,7 +234,7 @@ Thus the server sees the close also while Julia thread 1 is busy and cannot fire
 `on_close` runs on the thread of the task.
 """
 function watch_close(on_close, http::HTTP.Stream)
-    # `h2_conn`, `tracked` and `conn` are internal fields of HTTP.jl 2.8.
+    # `h2_conn`, `tracked` and `conn` are internal fields of HTTP.jl 2.8 and 2.9.
     http.h2_conn === nothing || return nothing
     conn = http.tracked.conn
     conn isa HTTP.TCP.Conn || return nothing

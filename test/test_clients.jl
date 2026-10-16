@@ -144,7 +144,7 @@ end
         workspace = MCPTestHelpers.add_workspace!(state, [joinpath(MCPTestHelpers.TESTDATA_DIR, "HangPkg")])
         client = JuliaMCP.add_client!(state)
         msg = JSONRPC.Request("tools/call", Dict{String,Any}("name" => "julia_run_testitems",
-            "arguments" => Dict{String,Any}("name_pattern" => "^hangs", "max_wait_seconds" => 0)), 3, nothing)
+            "arguments" => Dict{String,Any}("name_pattern" => "^hangs", "max_wait_seconds" => 0)), Int64(3), nothing)
         request = JuliaMCP.open_request!(state, client, msg)
         JuliaMCP.dispatch_mcp_message(state, client, JuliaMCP.Outbox(Inf), msg; request)
         status() = lock(() -> only(values(workspace.runs)).status, state.lock)
